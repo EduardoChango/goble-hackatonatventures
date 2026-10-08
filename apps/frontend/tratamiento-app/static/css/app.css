@@ -52,7 +52,7 @@ a { color: inherit; }
 .b-pendiente { background: #D6E8F7; color: #0B3F6B; }
 
 label { font-size: 14px; font-weight: 500; color: var(--muted); }
-input[type=text], input[type=number], input[type=datetime-local], input[type=file] {
+input[type=text], input[type=email], input[type=password], input[type=number], input[type=datetime-local], input[type=file] {
   height: 48px; width: 100%; padding: 0 14px; font: 16px 'DM Sans', Arial, sans-serif; color: var(--navy);
   background: #fff; border: 1px solid #B8C6D3; border-radius: 10px; }
 input[type=file] { padding: 10px 12px; height: auto; }

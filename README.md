@@ -24,11 +24,12 @@ conectan a él.
 │   │   ├── process_job/handler.py   #   POST /jobs
 │   │   └── get_job/handler.py       #   GET  /jobs/{job_id}
 │   └── frontend/
-│       ├── bff/                     #   Flask (backend-for-frontend)
+│       ├── tratamiento-app/         #   App de la demo: Flask + PWA, login, PostgreSQL, IA (Bedrock)
+│       ├── bff/                     #   Flask (backend-for-frontend) del scaffold inicial
 │       └── ui/                      #   Streamlit (solo habla con el BFF)
 │
 ├── infra/                           # IaC: CloudFormation
-│   ├── template.yaml                #   DynamoDB + Layer + Lambdas + IAM + API Gateway
+│   ├── template.yaml                #   VPC + RDS + Lambda Flask + API HTTP, y DynamoDB + Lambdas de jobs
 │   └── deploy.sh                    #   empaqueta, sube a S3 y despliega
 │
 ├── db/                              # PostgreSQL: esquema, vistas y data fake (ver db/README.md)
@@ -95,10 +96,10 @@ Ver [mocks/README.md](mocks/README.md) para agregar escenarios o nuevas APIs.
 4. Evento de ejemplo en `mocks/entrypoint/events/`.
 5. En `infra/template.yaml`: agregar su rol, función, log group, método, permiso y parámetro `<Nombre>Key`. Luego agrégala a `LAMBDAS` en `scripts/package.py` y a `infra/deploy.sh`.
 
-## ⚠️ Pendiente: hosting del frontend
+## Hosting del frontend
 
-Amplify Hosting **no ejecuta servidores Python** (Flask o Streamlit). Solo sirve contenido estático y SSR de Node.
-Hay que decidir entre App Runner/ECS para el contenedor del frontend, o Flask como Lambda con una UI
-estática en Amplify.
+Amplify Hosting **no ejecuta servidores Python**, así que la app Flask `apps/frontend/tratamiento-app`
+corre en **AWS Lambda detrás de API Gateway HTTP** (que da el HTTPS), con RDS PostgreSQL y Claude en Bedrock.
+Ver [infra/README.md](infra/README.md).
 
 > `Job` es una entidad placeholder: renómbrala al concepto real del negocio.

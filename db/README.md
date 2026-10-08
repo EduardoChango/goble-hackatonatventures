@@ -1,4 +1,4 @@
-# Base de datos: PostgreSQL
+# Base de datos: PostgreSQL 17
 
 Modelo relacional de `apps/frontend/tratamiento-app`, con data fake de pacientes.
 Es **híbrido**: relacional para todo lo que se cruza (recetas, entregas del IESS, compras, stock). Los datos con forma de documento usan tipos nativos de Postgres:
@@ -18,7 +18,7 @@ docker compose -f db/docker-compose.yml up -d
 - **Zona horaria:** `America/Guayaquil`, para que `CURRENT_DATE` y las horas de las tomas cuadren con la app.
 - **Consola SQL:** `docker exec -it goble-postgres psql -U goble -d tratamiento`
 
-Los scripts de `init/` corren en orden **solo la primera vez**, cuando el volumen está vacío. Para resetear la data:
+Los scripts de `init/` corren en orden **solo la primera vez**, cuando el volumen está vacío. En AWS los ejecuta la Lambda `db-init` (ver [infra/README.md](../infra/README.md)). Para resetear la data local:
 
 ```bash
 docker compose -f db/docker-compose.yml down -v
@@ -30,18 +30,24 @@ docker compose -f db/docker-compose.yml up -d
 | Archivo | Contenido |
 |---|---|
 | `init/001_schema.sql` | Enums, tablas, restricciones y vistas |
-| `init/002_catalogos.sql` | 2 cadenas, 10 farmacias, 8 medicamentos, stock, promociones y condiciones (copiados de `data.py`) |
+| `init/002_catalogos.sql` | 2 cadenas, las 11 farmacias reales de Farmaenlace cerca de Puembo (de `farmacias.sql`), 8 medicamentos, stock simulado, promociones y condiciones |
 | `init/003_paciente_demo.sql` | Luis Mora (id 1), espejo exacto de `data.py::seed()` |
 | `init/004_pacientes_fake.sql` | **Generado.** 10 pacientes (ids 2-11), uno por caso |
+| `init/005_usuarios.sql` | **Generado.** Un usuario de login por paciente (contraseña `demo1234`) |
 | `init/999_sync_sequences.sql` | Alinea las secuencias tras insertar IDs fijos |
-| `gen_pacientes_fake.py` | Regenera `004` (determinista): `py db/gen_pacientes_fake.py` |
+| `gen_pacientes_fake.py` | Regenera `004` y `005` (determinista): `py db/gen_pacientes_fake.py` |
+| `farmacias.sql` | Fuente original de las farmacias (Google Maps). Su contenido ya está en `002` |
+
+Los bloques `-- @paciente N` y `-- @stock` marcan qué partes de las semillas vuelve a ejecutar
+el botón **Restablecer datos** del panel Demo: borra al paciente de la sesión, lo vuelve a cargar
+desde su bloque y repone el stock de las farmacias.
 
 ## Modelo
 
 ```
 cadena ─< farmacia ─< farmacia_stock >─ medicamento ─< promocion
                 │                            │
-paciente ─< visita ─< receta_item >──────────┘
+usuario ── paciente ─< visita ─< receta_item >──────────┘
    │  │               │  ├── entrega_iess (1:1)
    │  │               │  ├─< compra_item >─ compra >─ farmacia
    │  │               │  └─< toma
@@ -52,6 +58,7 @@ paciente ─< visita ─< receta_item >──────────┘
 
 | Tabla | Equivale en `data/state.json` |
 |---|---|
+| `usuario` | Login de la demo: cada usuario ve solo su paciente (contraseña con hash de werkzeug) |
 | `paciente`, `paciente_condicion`, `cita` | `perfil`. La edad se calcula a partir de `fecha_nacimiento` |
 | `visita` + `receta_item` | `visitas[].meds[]` |
 | `entrega_iess` | `entregas[fecha][med]`. Sin filas = el IESS aún no responde |
@@ -73,6 +80,8 @@ paciente ─< visita ─< receta_item >──────────┘
 | `v_paciente` | perfil con `edad`, `condiciones[]` y `proxima_cita` |
 
 ## Pacientes fake
+
+Todos usan la contraseña `demo1234`. El correo sale del nombre: `luis.mora@demo.ec`, `carmen.pazmino@demo.ec`, etc. (la lista completa aparece en la pantalla de login).
 
 | id | Caso | Qué se ve |
 |---|---|---|

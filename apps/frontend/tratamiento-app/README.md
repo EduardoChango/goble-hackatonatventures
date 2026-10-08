@@ -25,7 +25,35 @@ Todo el stock, las farmacias y el paciente son **datos de ejemplo**.
 3. Abre http://localhost:5000 en Chrome.
 4. Para verla como celular: F12 → Ctrl + Shift + M (modo dispositivo), o achica la ventana.
 
-Si el puerto 5000 está ocupado: `set PORT=5001` (Windows) o `PORT=5001 python3 app.py` (Mac/Linux).
+Si el puerto 5000 está ocupado: `$env:PORT=5001; python app.py` (PowerShell), `set PORT=5001` (cmd) o `PORT=5001 python3 app.py` (Mac/Linux).
+
+## Login y base de datos
+
+La app pide **login**: cada usuario ve solo los datos de su paciente. Hay dos modos:
+
+| Modo | Cuándo | Usuarios |
+|---|---|---|
+| **JSON** (por defecto) | Sin `DATABASE_URL`. Todo vive en `data/state.json`, como antes | Solo `luis.mora@demo.ec` / `demo1234` |
+| **PostgreSQL** | Con `DATABASE_URL`. Es como corre en AWS | 11 pacientes de prueba, todos con contraseña `demo1234` (la lista aparece en el login) |
+
+Para usar PostgreSQL en local (necesita Docker Desktop), desde la raíz del repo:
+
+```powershell
+docker compose -f db/docker-compose.yml up -d
+$env:DATABASE_URL = "postgresql://goble:goble@localhost:5432/tratamiento"
+python app.py
+```
+
+**Restablecer datos de ejemplo** (panel Demo) vuelve solo al paciente con el que entraste a su estado inicial.
+
+Pruebas automáticas (desde esta carpeta): `python -m pytest tests -v`. Con `DATABASE_URL` también prueban el login, el aislamiento entre usuarios y cada escritura en la base.
+
+## Lectura de recetas con IA
+
+`ai.py` usa Claude si encuentra credenciales; si no, devuelve una receta de ejemplo:
+
+- **En AWS:** Claude en Amazon Bedrock (`AI_PROVIDER=bedrock`), con el rol IAM de la Lambda. El modelo se elige con `CLAUDE_MODEL` (por defecto `anthropic.claude-opus-5-5`).
+- **En local:** `$env:ANTHROPIC_API_KEY = "..."` para usar la API de Anthropic directamente.
 
 ## Guion de la demo (2 minutos)
 
@@ -42,8 +70,10 @@ El botón **Demo** (arriba a la derecha) simula la hora, dispara avisos y **rest
 
 | Archivo | Para qué sirve | Quién |
 |---|---|---|
-| `ai.py` | Leer la receta desde la foto con IA. Hoy devuelve una receta de ejemplo | Edu |
-| `data.py` | Farmacias y stock simulado; estado guardado en `data/state.json` | Edu |
+| `ai.py` | Leer la receta desde la foto con IA (Bedrock o API de Anthropic; sin credenciales, receta de ejemplo) | Edu |
+| `data.py` | Farmacias, stock simulado y guardado del estado (JSON o PostgreSQL) | Edu |
+| `db.py` | Lectura y escritura en PostgreSQL (`db/init/` en la raíz tiene el esquema) | Edu |
+| `dbinit.py`, `lambda_handler.py` | Entradas de AWS Lambda: cargar la base y servir Flask | Edu |
 | `logic.py` | Reglas: comparar recetas, faltantes, avisos, farmacia cercana | Los dos |
 | `app.py` | Rutas de Flask | Edu |
 | `templates/*.html` y `static/css/app.css` | Pantallas y estilos | Faty |

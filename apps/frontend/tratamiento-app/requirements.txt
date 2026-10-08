@@ -1,3 +1,7 @@
 Flask>=3.0
-# Opcional, solo si Edu conecta la lectura de recetas con IA:
-# anthropic
+# PostgreSQL (solo se usa si existe DATABASE_URL; sin ella la app usa data/state.json)
+psycopg[binary]>=3.2
+# Lectura de recetas con Claude (API de Anthropic o Amazon Bedrock), ver ai.py
+anthropic[bedrock]>=1.12
+# Adaptador Flask -> AWS Lambda (solo se usa en AWS, ver lambda_handler.py)
+apig-wsgi>=2.18
