@@ -6,7 +6,7 @@ Todos los comandos se ejecutan en **PowerShell** (no hace falta abrirlo como adm
 ```
 Navegador ──HTTPS──► API Gateway HTTP ──► Lambda Flask ─┬─► RDS PostgreSQL 17 (red privada)
                                                         └─► NAT ─► Claude en Bedrock (recetas)
-Lambda db-init ──► crea el esquema y carga los 11 pacientes de prueba
+Lambda db-init ──► crea el esquema y carga el catálogo de Farmaenlace y los 11 pacientes de prueba
 ```
 
 > **Costo:** mientras el stack existe, el NAT Gateway cuesta unos USD 1,10 al día y RDS unos USD 0,40 al día, aunque nadie use la app.
@@ -67,9 +67,27 @@ aws sts get-caller-identity        # debe mostrar el Account del workshop
 
 ## Paso 3: Habilitar Claude en Bedrock (consola web)
 
-En la consola de AWS, **en la misma región**, ve a **Amazon Bedrock → Model access** y habilita **Claude Opus 5.5**.
+AWS retiró la página *Model access*: los modelos se habilitan solos la primera vez que se usan. En los modelos
+de Anthropic, la primera vez puede pedir un formulario de caso de uso, que la Lambda no puede llenar.
+Por eso conviene activarlo a mano antes de desplegar, **en la misma región** de tus credenciales:
 
-Si no lo haces, la app funciona igual, pero la lectura de recetas devuelve la receta de ejemplo.
+1. **Amazon Bedrock → Model catalog** → busca **Claude Sonnet 5** (Anthropic), el modelo que usa la app, y ábrelo.
+2. **Open in playground** y envía un mensaje cualquiera (por ejemplo, "hola").
+3. Si aparece el formulario de caso de uso, llénalo (por ejemplo: *"Hackathon demo: lectura de recetas médicas de ejemplo"*) y vuelve a probar.
+4. Si Claude responde en el playground, el modelo ya está activo para toda la cuenta.
+
+**Si aparece `AccessDeniedException ... private marketplace eligibility`:** la cuenta del workshop solo permite
+los modelos que aprobaron los organizadores. Prueba en el playground otros Claude y despliega con el que responda:
+
+| Modelo en el playground | Opción para `deploy.ps1` |
+|---|---|
+| Claude Sonnet 5 | `-ClaudeModel anthropic.claude-sonnet-5` |
+| Claude Opus 4.8 | `-ClaudeModel anthropic.claude-opus-4-8` |
+| Claude Fable 5.1 | `-ClaudeModel anthropic.claude-fable-5-1` |
+| Claude Haiku 4.5 | `-ClaudeModel anthropic.claude-haiku-4-5` |
+
+Si ninguno funciona, pregunta a los organizadores qué modelos están habilitados. La app funciona igual sin IA:
+la lectura de recetas devuelve la receta de ejemplo.
 
 ## Paso 4: Desplegar
 
@@ -84,12 +102,12 @@ powershell -ExecutionPolicy Bypass -File infra\deploy.ps1
 | Empaquetar | Genera los zips en `build\artifacts\`. La primera vez descarga las dependencias para Linux (1-2 min) |
 | Subir | Crea el bucket `goble-artifacts-<cuenta>-<región>` y sube los zips |
 | CloudFormation | Crea el stack `goble-dev`: VPC, NAT, RDS, Lambdas y API. **Unos 15 minutos la primera vez** |
-| Base de datos | Invoca la Lambda `goble-dev-db-init`, que carga los 11 pacientes |
+| Base de datos | Invoca la Lambda `goble-dev-db-init`, que carga el catálogo de Farmaenlace (farmacias, medicinas y stock) y los 11 pacientes |
 
 Opciones útiles:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -ClaudeModel anthropic.claude-sonnet-5-5   # otro modelo
+powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -ClaudeModel anthropic.claude-opus-4-8    # otro modelo
 powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -DbReset                                  # recarga la data fake
 ```
 
@@ -205,7 +223,8 @@ RDS se borra sin snapshot final y los secretos quedan programados para borrarse 
 | `CREATE_FAILED` con `not authorized` o `explicit deny` | La cuenta del workshop prohíbe ese recurso (por ejemplo NAT, EIP o RDS). Anota el recurso y el mensaje para buscar una alternativa |
 | `db-init` responde con error o timeout | `aws logs tail /aws/lambda/goble-dev-db-init`. La Lambda debe estar en la VPC y llegar a RDS por el puerto 5432 |
 | La URL responde `Internal Server Error` | `aws logs tail /aws/lambda/goble-dev-tratamiento-app` |
-| La receta siempre sale "simulada" | El modelo no está habilitado (Paso 3), la región no lo soporta, o la foto pesa más de unos 5 MB |
+| `AccessDeniedException ... private marketplace eligibility` en Bedrock | El workshop no aprobó ese modelo. Usa otro Claude con `-ClaudeModel` (Paso 3) |
+| La receta siempre sale "simulada" | El modelo no está activo: pruébalo en el playground de Bedrock (Paso 3). También puede ser que la región no lo soporte o que la foto pese más de unos 5 MB |
 | Archivos `deleted:` en `git status` que no borraste | OneDrive. `git restore .` los recupera |
 
 ---

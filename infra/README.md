@@ -16,7 +16,8 @@ Navegador ──HTTPS──► API Gateway HTTP ──► Lambda goble-<env>-tra
                                              ├──► RDS PostgreSQL 17 goble-<env>   (solo desde las Lambdas)
                                              └──► NAT ──► Claude en Bedrock (lectura de recetas)
 
-Lambda goble-<env>-db-init ──► crea el esquema y carga la data fake (db/init/*.sql)
+Lambda goble-<env>-db-init ──► crea el esquema y carga los datos: catálogo de Farmaenlace
+                               (db/datos_farmaenlace/) y pacientes de prueba (db/init/*.sql)
 ```
 
 | Recurso | Detalle |
@@ -32,7 +33,7 @@ Lambda goble-<env>-db-init ──► crea el esquema y carga la data fake (db/in
 
 ## Antes del primer deploy: acceso a Claude en Bedrock
 
-En la consola de AWS ve a **Bedrock → Model access** y habilita **Claude Opus 5.5**, en la misma región del stack. Sin ese acceso la app funciona igual, pero la lectura de recetas devuelve la receta de ejemplo. Para usar otro modelo: `CLAUDE_MODEL=anthropic.claude-sonnet-5-5 bash infra/deploy.sh`.
+Los modelos de Bedrock se habilitan solos al primer uso, pero los de Anthropic pueden pedir un formulario de caso de uso la primera vez. En la misma región del stack, abre **Bedrock → Model catalog → Claude Sonnet 5 → Open in playground** y envía un mensaje (detalle en [GUIA_DESPLIEGUE.md](GUIA_DESPLIEGUE.md), Paso 3). Sin ese acceso la app funciona igual, pero la lectura de recetas devuelve la receta de ejemplo. Para usar otro modelo: `CLAUDE_MODEL=anthropic.claude-opus-4-8 bash infra/deploy.sh`.
 
 ## Opción A: desde la terminal (recomendada)
 

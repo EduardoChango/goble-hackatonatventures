@@ -26,6 +26,8 @@ PROMPT = (
     "Usa el nombre genérico. Si un dato no se ve, usa null. No inventes datos."
 )
 FORMATOS = {"image/jpeg", "image/png", "image/gif", "image/webp"}
+# Modelos que aceptan `fallbacks: "default"` en la API directa de Anthropic
+FALLBACK_SERVIDOR = {"claude-fable-5-1", "claude-opus-5-5", "claude-opus-5", "claude-sonnet-5-5"}
 
 
 def _cliente():
@@ -39,9 +41,9 @@ def _cliente():
         respaldo = os.getenv("CLAUDE_FALLBACK_MODEL", "anthropic.claude-opus-4-8")
         cliente = anthropic.AnthropicBedrockMantle(
             aws_region=region, middleware=[anthropic.BetaRefusalFallbackMiddleware([{"model": respaldo}])])
-        return cliente, os.getenv("CLAUDE_MODEL", "anthropic.claude-opus-5-5")
+        return cliente, os.getenv("CLAUDE_MODEL", "anthropic.claude-sonnet-5")
     if os.getenv("ANTHROPIC_API_KEY"):
-        return anthropic.Anthropic(), os.getenv("CLAUDE_MODEL", "claude-opus-5-5")
+        return anthropic.Anthropic(), os.getenv("CLAUDE_MODEL", "claude-sonnet-5")
     return None, None
 
 
@@ -50,7 +52,7 @@ def _leer_con_ia(imagen, mime):
     if cliente is None:
         return None
     extra = {}
-    if os.getenv("AI_PROVIDER") != "bedrock":
+    if os.getenv("AI_PROVIDER") != "bedrock" and modelo in FALLBACK_SERVIDOR:
         # API directa: si el modelo rechaza, el servidor reintenta solo con otro modelo
         extra = {"betas": ["server-side-fallback-2026-07-01"], "fallbacks": "default"}
     msg = cliente.beta.messages.create(

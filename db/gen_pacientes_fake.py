@@ -154,7 +154,7 @@ def extraccion_ia(items):
                       "dosis_mg": it["dosis_mg"],
                       "cada_horas": it["cada_horas"],
                       "dias": None if i == 3 else it["dias"]})
-    return {"origen": "ia", "modelo": "claude-sonnet-5-5", "medicamentos": crudo}
+    return {"origen": "ia", "modelo": "anthropic.claude-sonnet-5", "medicamentos": crudo}
 
 
 def main():
