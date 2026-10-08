@@ -23,6 +23,19 @@ ESTADO_TEXTO = {"por_agotarse": "se acaba pronto", "agotado": "ya se acabó",
                 "no": "el IESS no la entregó"}
 
 
+ESTADO_PEDIDO = {"solicitado": "fue enviado a la farmacia", "confirmado": "fue confirmado",
+                 "en_camino": "está en camino", "listo_para_retiro": "está listo para retirar",
+                 "entregado": "fue entregado", "rechazado": "no pudo prepararse", "cancelado": "fue cancelado"}
+
+
+def _hora(iso):
+    """'2026-10-08T19:30:00+00:00' -> '14:30' (hora local de la app)."""
+    if not iso:
+        return None
+    from datetime import datetime
+    return datetime.fromisoformat(iso).astimezone().strftime("%H:%M")
+
+
 def destinatarios(detail):
     """Cuidadores del evento + el paciente (si tiene login con email)."""
     correos = [c["email"] for c in detail.get("cuidadores", []) if c.get("email")]
@@ -65,9 +78,23 @@ def armar(detail_type, detail):
             lineas.append(f"• {m['nombre']} {m['concentracion']}: {ESTADO_TEXTO.get(m['estado_iess'], m['estado_iess'])}"
                           f" (faltan {m['falta']} de {m['total']}).")
     elif detail_type == "PedidoActualizado":
-        asunto = f"{paciente}: tu pedido está {detail.get('estado', 'actualizado')}"
-        lineas.append(f"Pedido {detail.get('pedido_id', '')} en {detail.get('farmacia', 'la farmacia')}: "
-                      f"{detail.get('estado', '')}.")
+        estado = detail.get("estado", "")
+        texto_estado = ESTADO_PEDIDO.get(estado, estado)
+        automatico = detail.get("origen") == "suscripcion"
+        asunto = f"{paciente}: tu pedido{' automático' if automatico else ''} {texto_estado}"
+        if automatico and estado == "confirmado":
+            lineas.append("Tu abastecimiento automático detectó que la medicación se está terminando "
+                          "y generó este pedido por ti.")
+        hora = _hora(detail.get("eta"))
+        donde = (f"a {detail.get('farmacia')}" if detail.get("modo") == "retiro"
+                 else f"desde {detail.get('farmacia')} a domicilio")
+        lineas.append(f"Pedido {detail.get('ref') or detail.get('pedido_id')} {donde}: {texto_estado}"
+                      + (f" (hora estimada {hora})." if hora and estado in ("confirmado", "en_camino") else "."))
+        if estado == "listo_para_retiro":
+            lineas.append(f"Retíralo en {detail.get('farmacia')}, {detail.get('direccion_farmacia', '')}.")
+        if detail.get("motivo"):
+            lineas.append(f"Motivo: {detail['motivo']}")
+        lineas += [f"• {i['nombre']} {i['concentracion']}: {i['cantidad']} unidades" for i in detail.get("items", [])]
     else:
         return None
 

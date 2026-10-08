@@ -289,6 +289,7 @@ Resources:
           CLAUDE_MODEL: !Ref ClaudeModel
           BEDROCK_REGION: !If [BedrockRegionDefault, !Ref "AWS::Region", !Ref BedrockRegion]
           EVENT_BUS_NAME: !Ref EventBus
+          FARMAENLACE_WEBHOOK_SECRET: !Sub "{{resolve:secretsmanager:${FarmaenlaceWebhookSecret}}}"
 
   DbInitFunction:
     Type: AWS::Lambda::Function
@@ -384,7 +385,11 @@ Resources:
             Resource: !GetAtt EventosDlq.Arn
             Condition:
               ArnEquals:
-                aws:SourceArn: [!GetAtt ReglaEvaluador.Arn, !GetAtt ReglaNotificador.Arn]
+                aws:SourceArn:
+                  - !GetAtt ReglaEvaluador.Arn
+                  - !GetAtt ReglaNotificador.Arn
+                  - !GetAtt ReglaFarmaenlaceDemanda.Arn
+                  - !GetAtt ReglaFarmaenlacePedidos.Arn
 
   EvaluadorFunction:
     Type: AWS::Lambda::Function
@@ -542,10 +547,169 @@ Resources:
     Properties:
       EmailIdentity: !Ref EmailRemitente
 
+  # ===========================================================================
+  # Farmaenlace (MOCK para el MVP): sistema "externo" con su propia API.
+  #   PedidoSolicitado ─► API Destination ─► POST /pedidos ─┐ reserva stock, confirma o rechaza
+  #   DemandaPrevista  ─► API Destination ─► POST /demanda  │
+  #   callback firmado (HMAC) ◄─────────────────────────────┘ ─► app /api/v1/webhooks/farmaenlace
+  # Para usar la API real de Farmaenlace: apuntar las API Destinations a su URL y ajustar la Connection.
+  # ===========================================================================
+  FarmaenlaceApiKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub goble-${EnvName}/farmaenlace-api-key
+      Description: API key con la que EventBridge llama a la API de Farmaenlace (mock)
+      GenerateSecretString: { PasswordLength: 40, ExcludePunctuation: true }
+
+  FarmaenlaceWebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub goble-${EnvName}/farmaenlace-webhook-secret
+      Description: Secreto HMAC con el que Farmaenlace firma los callbacks de estado de los pedidos
+      GenerateSecretString: { PasswordLength: 48, ExcludePunctuation: true }
+
+  FarmaenlaceMockFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub goble-${EnvName}-farmaenlace-mock
+      Description: Simula a Farmaenlace (demanda prevista, pedidos, reserva de stock, callbacks)
+      Runtime: python3.12
+      Handler: farmaenlace_mock.lambda_handler.handler
+      Role: !GetAtt AppRole.Arn
+      Timeout: 29
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Ref FrontendKey
+      VpcConfig:
+        SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: tratamiento
+          DB_USER: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+          DB_PASSWORD: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+          FARMAENLACE_API_KEY: !Sub "{{resolve:secretsmanager:${FarmaenlaceApiKey}}}"
+          FARMAENLACE_WEBHOOK_SECRET: !Sub "{{resolve:secretsmanager:${FarmaenlaceWebhookSecret}}}"
+          MODULO_WEBHOOK_URL: !Sub "${FrontendHttpApi.ApiEndpoint}/api/v1/webhooks/farmaenlace"
+
+  FarmaenlaceMockLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/goble-${EnvName}-farmaenlace-mock
+      RetentionInDays: 14
+
+  FarmaenlaceHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-mock
+      ProtocolType: HTTP
+      Target: !GetAtt FarmaenlaceMockFunction.Arn
+
+  FarmaenlaceInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref FarmaenlaceMockFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FarmaenlaceHttpApi}/*
+
+  FarmaenlaceConnection:
+    Type: AWS::Events::Connection
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: x-api-key
+          ApiKeyValue: !Sub "{{resolve:secretsmanager:${FarmaenlaceApiKey}}}"
+
+  FarmaenlaceDemandaDestino:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-demanda
+      ConnectionArn: !GetAtt FarmaenlaceConnection.Arn
+      InvocationEndpoint: !Sub "${FarmaenlaceHttpApi.ApiEndpoint}/demanda"
+      HttpMethod: POST
+      InvocationRateLimitPerSecond: 10
+
+  FarmaenlacePedidosDestino:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-pedidos
+      ConnectionArn: !GetAtt FarmaenlaceConnection.Arn
+      InvocationEndpoint: !Sub "${FarmaenlaceHttpApi.ApiEndpoint}/pedidos"
+      HttpMethod: POST
+      InvocationRateLimitPerSecond: 10
+
+  ApiDestinationsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invocar-api-destinations
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: events:InvokeApiDestination
+                Resource:
+                  - !GetAtt FarmaenlaceDemandaDestino.Arn
+                  - !GetAtt FarmaenlacePedidosDestino.Arn
+
+  ReglaFarmaenlaceDemanda:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-demanda
+      Description: Demanda prevista (anónima) hacia Farmaenlace para que ubique stock
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source: [goble.abastecimiento]
+        detail-type: [DemandaPrevista]
+      Targets:
+        - Id: farmaenlace-demanda
+          Arn: !GetAtt FarmaenlaceDemandaDestino.Arn
+          RoleArn: !GetAtt ApiDestinationsRole.Arn
+          InputPath: $.detail
+          RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 3600 }
+          DeadLetterConfig: { Arn: !GetAtt EventosDlq.Arn }
+
+  ReglaFarmaenlacePedidos:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-pedidos
+      Description: Pedidos (delivery o retiro, manuales o de la suscripción) hacia Farmaenlace
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source: [goble.abastecimiento]
+        detail-type: [PedidoSolicitado]
+      Targets:
+        - Id: farmaenlace-pedidos
+          Arn: !GetAtt FarmaenlacePedidosDestino.Arn
+          RoleArn: !GetAtt ApiDestinationsRole.Arn
+          InputPath: $.detail
+          RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 3600 }
+          DeadLetterConfig: { Arn: !GetAtt EventosDlq.Arn }
+
 Outputs:
   FrontendUrl:
     Description: URL pública (HTTPS) de la app Mi tratamiento
     Value: !GetAtt FrontendHttpApi.ApiEndpoint
+  FarmaenlaceUrl:
+    Description: API del mock de Farmaenlace (exige x-api-key; la clave está en Secrets Manager)
+    Value: !GetAtt FarmaenlaceHttpApi.ApiEndpoint
+  FarmaenlaceMockFunctionName:
+    Description: Lambda del mock; para la demo acepta {"accion":"pedidos"} y {"accion":"avanzar","ref":"..."}
+    Value: !Ref FarmaenlaceMockFunction
   EventBusName:
     Description: Bus de eventos del módulo de abastecimiento
     Value: !Ref EventBus

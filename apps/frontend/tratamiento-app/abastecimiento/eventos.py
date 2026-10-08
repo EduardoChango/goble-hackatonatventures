@@ -88,6 +88,15 @@ def _al_notificador(detail_type, detail):
     notificador.notificar(detail_type, detail)
 
 
+def _a_farmaenlace(detail_type, detail):
+    """En AWS es una API Destination hacia la API del mock; en local, la misma lógica en proceso."""
+    from farmaenlace_mock import servicio
+    if detail_type == "DemandaPrevista":
+        servicio.recibir_demanda(detail)
+    elif detail_type == "PedidoSolicitado":
+        servicio.recibir_pedido(detail)
+
+
 def _sin_efecto(detail_type, detail):
     """Destinos externos que llegan en fases siguientes: en local basta con registrar la entrega."""
 
@@ -96,7 +105,7 @@ _DESTINOS_LOCALES = {
     "evaluador": _al_evaluador,
     "notificador": _al_notificador,         # email por SES (o simulado si no hay remitente)
     "webhook-app-principal": _sin_efecto,   # fase 5: receptor de webhooks de demo
-    "farmaenlace": _sin_efecto,             # fase 4: mock de Farmaenlace
+    "farmaenlace": _a_farmaenlace,          # mock de Farmaenlace
 }
 
 

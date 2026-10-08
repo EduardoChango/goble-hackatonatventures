@@ -38,6 +38,7 @@ docker compose -f db/docker-compose.yml up -d
 | `init/006_abastecimiento.sql` | Módulo de abastecimiento: reloj de la demo, cuidadores, productos relacionados, medicamentos controlados y la vista `v_saldo_medicacion` |
 | `init/007_pacientes_cuidadores.sql` | **Generado.** 4 pacientes con movilidad reducida (ids 12-15), 3 cuidadores y sus logins |
 | `init/008_eventos.sql` | Alertas idempotentes (`alerta`) y registro de eventos (`evento_log`) del evaluador |
+| `init/009_pedidos.sql` | Pedidos a Farmaenlace (`pedido`, `pedido_item`), suscripción de abastecimiento automático y el esquema `farmaenlace` del mock |
 | `init/999_sync_sequences.sql` | Alinea las secuencias tras insertar IDs fijos |
 | `gen_pacientes_fake.py` | Regenera `004` y `005` (determinista): `py db/gen_pacientes_fake.py` |
 | `datos_farmaenlace/farmacias.sql` | 11 farmacias reales de Farmaenlace (Económicas y Medicity) cerca de Puembo, de Google Maps (2026-10-08) |
@@ -135,6 +136,20 @@ DELETE FROM config_demo WHERE clave = 'fecha_referencia';     -- volver a hoy
 | `producto`, `regla_sugerencia` | Productos no medicamentosos sugeridos por condición o por grupo de medicina |
 | `config_demo` | Reloj de la demo |
 | Columnas nuevas | `paciente.umbral_dias`, `direccion_entrega`, `movilidad_reducida`; `medicinas.controlado` (provisional, validar con ARCSA) |
+
+### Pedidos y abastecimiento automático
+
+| Tabla | Contenido |
+|---|---|
+| `pedido`, `pedido_item` | Delivery o retiro; origen `manual`, `suscripcion` o `api`. Estados: `solicitado → confirmado → en_camino` (delivery) o `listo_para_retiro` (retiro) `→ entregado`, o `rechazado` / `cancelado` |
+| `suscripcion` | Abastecimiento automático: margen de días, farmacia preferida, pago contra entrega. **Patricio (14) la tiene activa** |
+| `farmaenlace.demanda`, `farmaenlace.pedido` | Lo que "ve" Farmaenlace (mock): demanda prevista y pedidos con su estado |
+
+**Reglas de la suscripción:**
+- **Qué pide:** un mes de cada medicina con días restantes ≤ margen. No pide lo que ya tiene un pedido abierto, ni repite el mismo día lo rechazado.
+- **Qué excluye:** los controlados (requieren retiro con receta especial) y a los pacientes sin consentimiento.
+- **Reparto entre sucursales:** cada medicina va a la preferida si alcanza; si no, a la sucursal con stock completo más conveniente. Si ninguna la tiene completa, se pide lo máximo disponible (queda registrado `SuscripcionParcial`).
+- **Al entregarse:** el pedido cuenta como compra, sin descontar stock dos veces, porque Farmaenlace lo reservó al confirmar.
 
 ### Evaluador y eventos
 

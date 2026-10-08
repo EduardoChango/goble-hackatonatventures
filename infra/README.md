@@ -24,6 +24,11 @@ Monitoreo continuo del abastecimiento:
   App: PacienteActualizado ───────┼─► bus goble-<env>-abastecimiento ─┬─► Lambda evaluador ─► publica alertas
        EvaluacionSolicitada ──────┘   (archivo 7 días para replay)    └─► Lambda notificador ─► SES
   Eventos que no se pudieron entregar tras 3 reintentos ─► SQS goble-<env>-eventos-dlq
+
+Pedidos a Farmaenlace (mock en el MVP, con su propia API):
+  PedidoSolicitado ─► API Destination ─► POST /pedidos ─► reserva stock, confirma o rechaza
+  DemandaPrevista  ─► API Destination ─► POST /demanda
+  callback firmado (HMAC) ─► app /api/v1/webhooks/farmaenlace ─► PedidoActualizado ─► email
 ```
 
 | Recurso | Detalle |
@@ -37,6 +42,7 @@ Monitoreo continuo del abastecimiento:
 | EventBridge | Bus `goble-<env>-abastecimiento` con archivo de 7 días, reglas hacia el evaluador y el notificador, DLQ en SQS |
 | EventBridge Scheduler | `goble-<env>-evaluacion`, con `FrecuenciaEvaluacion` (`rate(2 minutes)` en demo). Se omite con `-SinScheduler` |
 | SES | Identidad del remitente solo si se pasa `-EmailRemitente`. Sin ella, los avisos se simulan y quedan en `evento_log` |
+| Farmaenlace (mock) | Lambda + API HTTP `goble-<env>-farmaenlace-mock`, API Destinations con API key y secreto HMAC para los callbacks. Para la API real basta con cambiar la URL de las API Destinations y la Connection |
 
 **Costo aproximado mientras el stack existe:** el NAT Gateway cuesta unos USD 1,10 al día y RDS unos USD 0,40 al día. Lambda, API Gateway y Bedrock se cobran por uso. **Borra el stack al terminar la demo.**
 

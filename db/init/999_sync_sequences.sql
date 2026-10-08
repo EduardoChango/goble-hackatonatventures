@@ -5,7 +5,7 @@ DECLARE
     t TEXT;
 BEGIN
     FOREACH t IN ARRAY ARRAY['promocion', 'condicion',
-                             'cuidador', 'producto', 'regla_sugerencia', 'paciente', 'usuario', 'cita', 'visita', 'receta_item', 'compra', 'toma', 'aviso', 'alerta', 'evento_log']
+                             'cuidador', 'producto', 'regla_sugerencia', 'paciente', 'usuario', 'cita', 'visita', 'receta_item', 'compra', 'toma', 'aviso', 'alerta', 'evento_log', 'pedido']
     LOOP
         EXECUTE format(
             'SELECT setval(pg_get_serial_sequence(%L, ''id''), COALESCE((SELECT max(id) FROM %I), 0) + 1, false)',

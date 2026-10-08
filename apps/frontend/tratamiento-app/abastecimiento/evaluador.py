@@ -13,7 +13,7 @@ import uuid
 from collections import defaultdict
 
 import db
-from abastecimiento import eventos, farmacias
+from abastecimiento import eventos, farmacias, suscripcion
 from abastecimiento import repositorio as repo
 
 CRITICOS = ("por_agotarse", "agotado")
@@ -59,7 +59,7 @@ def evaluar(paciente_id=None, origen="programado"):
     for fila in repo.saldos(paciente_id):
         por_paciente[fila["paciente_id"]].append(fila)
     resumen = {"origen": origen, "fecha_referencia": hoy.isoformat(), "pacientes_evaluados": len(por_paciente),
-               "alertas_nuevas": 0, "eventos": []}
+               "alertas_nuevas": 0, "eventos": [], "pedidos_automaticos": []}
 
     for pid, filas in por_paciente.items():
         criticos = [f for f in filas if f["estado"] in CRITICOS
@@ -70,10 +70,13 @@ def evaluar(paciente_id=None, origen="programado"):
             tipo, fecha = ("iess_sin_respuesta", hoy) if sin_respuesta else ("entrega_iess_incompleta", e["inicio"])
             if _crear_alerta(pid, e["receta_item_id"], tipo, fecha, detalle=e["estado_iess"] or "sin respuesta"):
                 iess.append(e)
-        if not criticos and not iess:
-            continue
-        resumen["alertas_nuevas"] += len(criticos) + len(iess)
-        resumen["eventos"] += _publicar_paciente(pid, hoy, criticos, iess)
+        if criticos or iess:
+            resumen["alertas_nuevas"] += len(criticos) + len(iess)
+            resumen["eventos"] += _publicar_paciente(pid, hoy, criticos, iess)
+        # Abastecimiento automático: si tiene suscripción, el pedido a domicilio se genera solo
+        for p in suscripcion.procesar(pid, filas):
+            resumen["pedidos_automaticos"].append({"paciente_id": pid, "pedido_id": p["id"],
+                                                   "farmacia": p["farmacia"], "estado": p["estado"]})
 
     eventos.registrar(str(uuid.uuid4()), "interno", "EvaluacionEjecutada",
                       {**resumen, "paciente_id": paciente_id})

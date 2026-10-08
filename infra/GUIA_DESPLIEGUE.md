@@ -227,6 +227,38 @@ $Dlq = aws cloudformation describe-stacks --stack-name goble-dev `
 aws sqs get-queue-attributes --queue-url $Dlq --attribute-names ApproximateNumberOfMessages
 ```
 
+## Paso 5c: Pedidos a Farmaenlace y abastecimiento automático
+
+**Patricio Andrade** (cuadriplejia) tiene la **suscripción de abastecimiento automático** activa. Hoy su
+medicación alcanza para 25 días; al simular +20 días entra en el margen y el evaluador **genera solo los pedidos
+a domicilio**:
+
+```powershell
+Set-Content -Path "$Env:TEMP\reloj.json" -Value '{"origen": "manual", "avanzar_dias": 20}' -Encoding ascii
+aws lambda invoke --function-name goble-dev-evaluador --payload "fileb://$Env:TEMP\reloj.json" "$Env:TEMP\salida.json"
+Get-Content "$Env:TEMP\salida.json"      # "pedidos_automaticos": 2 pedidos de Patricio
+```
+
+Ninguna sucursal tiene el mes completo de sus 3 medicamentos, así que el pedido se **reparte**: Medicity Puembo
+(su preferida) y Económicas Pifo Chaupimolino (oxibutinina, parcial: 56 de 60).
+
+Ver los pedidos **como los ve Farmaenlace** y hacerlos avanzar (confirmado → en camino → entregado):
+
+```powershell
+Set-Content -Path "$Env:TEMP\fe.json" -Value '{"accion": "pedidos"}' -Encoding ascii
+aws lambda invoke --function-name goble-dev-farmaenlace-mock --payload "fileb://$Env:TEMP\fe.json" "$Env:TEMP\fe-salida.json"
+Get-Content "$Env:TEMP\fe-salida.json"   # anota el "ref" (FE-PED-000001)
+
+Set-Content -Path "$Env:TEMP\fe.json" -Value '{"accion": "avanzar", "ref": "FE-PED-000001"}' -Encoding ascii
+aws lambda invoke --function-name goble-dev-farmaenlace-mock --payload "fileb://$Env:TEMP\fe.json" "$Env:TEMP\fe-salida.json"
+```
+
+Cada cambio de estado llega al módulo por un callback **firmado** y genera un email al cuidador ("tu pedido
+automático fue confirmado", "está en camino", "fue entregado"). Al entregarse, el pedido cuenta como compra y el
+saldo de Patricio vuelve a verde.
+
+La demanda prevista (anónima) que recibió Farmaenlace: `{"accion": "demanda"}` con el mismo comando.
+
 ## Paso 6: Ver logs
 
 ```powershell
@@ -275,6 +307,8 @@ RDS se borra sin snapshot final y los secretos quedan programados para borrarse 
 | `CREATE_FAILED` en `EvaluacionProgramada` o `SchedulerRole` | La cuenta no permite EventBridge Scheduler. Borra el stack y despliega con `-SinScheduler` |
 | `CREATE_FAILED` en `EmailRemitenteIdentity` | SES no está permitido o la identidad ya existe. Despliega sin `-EmailRemitente` (los avisos se simulan) |
 | No llegan los correos | Revisa que abriste el enlace de verificación de SES y que usas `-EmailDestinoDemo` con una casilla verificada. `aws logs tail /aws/lambda/goble-dev-notificador` muestra el motivo |
+| Los pedidos quedan en `solicitado` | El evento no llegó a Farmaenlace: revisa la DLQ y `aws logs tail /aws/lambda/goble-dev-farmaenlace-mock` |
+| Un pedido sale `rechazado` | Esa sucursal no tiene stock suficiente (el motivo viene en el pedido). El abastecimiento automático lo reintenta al día siguiente |
 | `db-init` responde con error o timeout | `aws logs tail /aws/lambda/goble-dev-db-init`. La Lambda debe estar en la VPC y llegar a RDS por el puerto 5432 |
 | La URL responde `Internal Server Error` | `aws logs tail /aws/lambda/goble-dev-tratamiento-app` |
 | `AccessDeniedException ... private marketplace eligibility` en Bedrock | El workshop no aprobó ese modelo. Usa otro Claude con `-ClaudeModel` (Paso 3) |
