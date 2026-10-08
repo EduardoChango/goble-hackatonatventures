@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}¿Qué entregó el IESS?{% endblock %}
+{% block header %}
+<p class="eyebrow">Entrega del IESS</p>
+<h1>¿Te entregaron tu medicina en el IESS?</h1>
+<p class="sub">{% if visita %}Receta del {{ fecha_corta(visita.fecha) }} · marca qué recibiste{% endif %}</p>
+{% endblock %}
+{% block content %}
+{% if not visita %}
+  <section class="card"><p>Primero registra una receta.</p></section>
+  <a class="btn" href="/receta?nueva=1">Subir receta</a>
+{% elif not perfil.iess %}
+  <section class="card"><h2>El paciente no está afiliado al IESS</h2>
+    <p>Entonces buscamos todo en farmacias Farmaenlace.</p></section>
+  <a class="btn" href="/farmacias">Ver farmacia cercana</a>
+{% else %}
+<form method="post" style="display:flex;flex-direction:column;gap:12px">
+  {% for m in meds %}
+  {% set i = loop.index0 %}
+  <section class="card">
+    <div class="row"><h3>{{ m.nombre }} {{ m.dosis_mg }} mg</h3><p class="muted" style="font-size:14px">Recetado: {{ m.total }}</p></div>
+    <div class="seg" role="radiogroup" aria-label="Qué entregaron de {{ m.nombre }}">
+      <label><input type="radio" name="estado_{{ i }}" value="completo" {{ 'checked' if m.e.estado == 'completo' }}><span>Completo</span></label>
+      <label><input type="radio" name="estado_{{ i }}" value="parcial" {{ 'checked' if m.e.estado == 'parcial' }}><span>Parcial</span></label>
+      <label><input type="radio" name="estado_{{ i }}" value="no" {{ 'checked' if m.e.estado == 'no' }}><span>No, sin stock</span></label>
+    </div>
+    <div class="campo" id="parcial_{{ i }}" {% if m.e.estado != 'parcial' %}hidden{% endif %}>
+      <label for="rec_{{ i }}">¿Cuántas unidades recibiste?</label>
+      <input id="rec_{{ i }}" name="recibido_{{ i }}" type="number" min="0" max="{{ m.total }}" value="{{ m.e.recibido if m.e.estado == 'parcial' else '' }}">
+    </div>
+  </section>
+  {% endfor %}
+  <button class="btn" type="submit">Guardar y ver qué falta</button>
+</form>
+{% endif %}
+{% endblock %}
+{% block scripts %}
+<script>
+// Muestra el campo de unidades solo cuando la entrega fue parcial.
+document.querySelectorAll('input[type=radio][name^=estado_]').forEach(function (r) {
+  r.addEventListener('change', function () {
+    var i = r.name.split('_')[1];
+    var caja = document.getElementById('parcial_' + i);
+    if (caja) caja.hidden = document.querySelector('input[name=estado_' + i + ']:checked').value !== 'parcial';
+  });
+});
+</script>
+{% endblock %}

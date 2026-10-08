@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Farmacia cercana con stock{% endblock %}
+{% block header %}
+<p class="eyebrow">{% if faltantes %}Falta: {{ faltantes|map(attribute='nombre')|join(' y ') }}{% else %}Farmacias{% endif %}</p>
+<h1>Farmacia cercana con stock</h1>
+<p class="sub">Desde tu ubicación · <a href="#" onclick="usarUbicacion(true);return false">usar mi ubicación actual</a></p>
+{% endblock %}
+{% block content %}
+<p class="muted" id="ubic-estado" style="font-size:14px;margin:0"></p>
+<section class="card" aria-label="Promociones de hoy">
+  <h2>Promociones de hoy</h2>
+  {% for x in promos %}
+  <div class="row" style="align-items:flex-start">
+    <div>
+      <p style="font-weight:700">{{ x.titulo }}</p>
+      <p class="muted" style="font-size:14px">{{ x.detalle }}</p>
+    </div>
+    <div style="text-align:right">
+      {% if x.tuyo %}<span class="badge b-nuevo">Para tu receta</span><br>{% endif %}
+      <span class="muted" style="font-size:13px">{{ x.vence }}</span>
+    </div>
+  </div>
+  {% endfor %}
+  <p class="muted" style="font-size:13px">Promociones de ejemplo.</p>
+</section>
+{% if not faltantes %}
+  <section class="card ok"><h2>No tienes nada por comprar</h2>
+    <p>Cuando falte una medicina, aquí verás la farmacia Farmaenlace más cercana con stock.</p></section>
+{% else %}
+  <svg class="map" viewBox="0 0 350 170" role="img" aria-label="Mapa de ejemplo con tu ubicación y las farmacias más cercanas">
+    <rect width="350" height="170" fill="#E6EDF2"/>
+    <path d="M0 60H350M0 120H350M90 0V170M200 0V170M290 0V170" stroke="#fff" stroke-width="10"/>
+    {% for p in puntos[1:] %}
+      <line x1="{{ puntos[0][0] }}" y1="{{ puntos[0][1] }}" x2="{{ p[0] }}" y2="{{ p[1] }}" stroke="#0B5A94" stroke-width="2" stroke-dasharray="6 5" opacity="{{ 0.9 if loop.first else 0.35 }}"/>
+    {% endfor %}
+    {% for p in puntos[1:] %}
+      <circle cx="{{ p[0] }}" cy="{{ p[1] }}" r="12" fill="{{ '#8FCB4F' if loop.first else '#fff' }}" stroke="#0E2A47" stroke-width="3"/>
+      <text x="{{ p[0] }}" y="{{ p[1] + 5 }}" text-anchor="middle" font-size="13" font-weight="700" fill="#0E2A47" font-family="DM Sans, Arial, sans-serif">{{ loop.index }}</text>
+    {% endfor %}
+    <circle cx="{{ puntos[0][0] }}" cy="{{ puntos[0][1] }}" r="9" fill="#0B5A94" stroke="#fff" stroke-width="3"/>
+  </svg>
+  {% for f in lista %}
+  <section class="card farm {{ 'mejor' if f.completa }}">
+    <div class="row">
+      <h3>{{ loop.index }} · {{ f.nombre }}</h3>
+      <p style="font-weight:700;color:var(--blue);white-space:nowrap">{{ '%.1f'|format(f.dist) }} km</p>
+    </div>
+    <p class="muted" style="font-size:14px">{{ f.horario }}{% if f.completa %} · <b style="color:#1F4D0B">Tiene todo lo que falta</b>{% endif %}</p>
+    {% for x in f.stock %}
+    <div class="stockfila"><span>{{ x.nombre }} {{ x.dosis_mg }} mg</span>
+      {% if x.estado == 'hay' %}<span class="badge b-hay">Hay · {{ x.unidades }} u.</span>
+      {% elif x.estado == 'poco' %}<span class="badge b-poco">Poco · {{ x.unidades }} u.</span>
+      {% else %}<span class="badge b-no">Sin stock</span>{% endif %}
+    </div>
+    {% endfor %}
+    {% if f.cubre > 0 or f.stock|selectattr('estado', 'equalto', 'poco')|list %}
+    <form method="post" action="/farmacias/comprar" class="dos" style="margin-top:4px">
+      <input type="hidden" name="farmacia" value="{{ f.id }}">
+      <button class="btn sec chico" type="submit" name="modo" value="recoger">Recoger yo</button>
+      <button class="btn chico" type="submit" name="modo" value="envio">Pedir envío</button>
+    </form>
+    {% endif %}
+    <a href="https://www.google.com/maps/dir/?api=1&destination={{ f.lat }},{{ f.lng }}" target="_blank" rel="noopener" style="font-size:14px;color:var(--blue);font-weight:700">Cómo llegar</a>
+  </section>
+  {% endfor %}
+  <p class="nota"><b>Stock de ejemplo (simulado).</b> Con recetas que lo exijan, el químico farmacéutico valida antes de dispensar.</p>
+{% endif %}
+{% endblock %}

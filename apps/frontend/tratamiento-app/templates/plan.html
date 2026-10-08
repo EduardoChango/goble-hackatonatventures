@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Plan de hoy{% endblock %}
+{% block header %}
+<p class="eyebrow">{{ perfil.nombre }}</p>
+<h1>Plan de hoy</h1>
+<p class="sub">{{ fecha_larga(hoy_iso()) }} · son las {{ hora }}</p>
+{% endblock %}
+{% block content %}
+{% set sig = dia.siguiente %}
+{% for d in dia.dosis %}
+<div class="dosis {{ 'siguiente' if sig and sig.id == d.id }}">
+  <span class="hora">{{ d.hora }}</span>
+  <span class="nom">{{ d.nombre }} {{ d.dosis_mg }} mg</span>
+  {% if d.tomada %}<span class="badge b-tomado">Tomado</span>
+  {% elif d.sin_medicina %}<span class="badge b-sinmed">Sin medicina</span>
+  {% else %}
+    <form method="post" action="/plan/tomar" style="margin:0">
+      <input type="hidden" name="id" value="{{ d.id }}">
+      <button class="btn sec chico" type="submit" aria-label="Marcar como tomada {{ d.nombre }} de las {{ d.hora }}">Marcar tomado</button>
+    </form>
+  {% endif %}
+</div>
+{% else %}
+<section class="card"><p>No hay una receta registrada.</p></section>
+{% endfor %}
+
+<section class="card">
+  <h2>Próximos avisos</h2>
+  {% for c in compras %}
+  <div><p style="font-weight:700">Comprar {{ c.nombre }} antes del {{ fecha_corta(c.limite) }}</p>
+       <p class="muted" style="font-size:14px">Te quedan {{ c.dias }} días de tratamiento.</p></div>
+  {% endfor %}
+  {% for x in faltantes %}
+  <div><p style="font-weight:700">Comprar {{ x.nombre }} hoy</p><p class="muted" style="font-size:14px">{{ x.motivo }}.</p></div>
+  {% endfor %}
+  {% if perfil.cita %}
+  <div><p style="font-weight:700">Control médico · {{ fecha_corta(perfil.cita) }}, {{ perfil.cita[11:16] }}</p>
+       <p class="muted" style="font-size:14px">Te avisamos un día antes.</p></div>
+  {% endif %}
+</section>
+<p class="nota"><b>Cómo te avisamos:</b> con un aviso en la app y, si lo activas, una notificación del celular. La app solo repite lo que dice la receta.</p>
+{% if faltantes %}<a class="btn" href="/farmacias">Comprar lo que falta</a>{% endif %}
+{% endblock %}

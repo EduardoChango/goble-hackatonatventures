@@ -10,3 +10,6 @@ build/
 dist/
 cdk.out/
 .DS_Store
+
+# Estado local de la demo de tratamiento-app
+apps/frontend/tratamiento-app/data/state.json

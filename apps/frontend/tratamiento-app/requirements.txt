@@ -1,0 +1,3 @@
+Flask>=3.0
+# Opcional, solo si Edu conecta la lectura de recetas con IA:
+# anthropic

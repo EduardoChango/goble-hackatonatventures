@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Hoy · Mi tratamiento{% endblock %}
+{% block header %}
+<p class="eyebrow">{{ fecha_larga(hoy_iso()) }}</p>
+<h1>Hoy · {{ perfil.nombre }}</h1>
+<p class="sub"><a href="/perfil">Editar perfil</a> · datos de ejemplo</p>
+{% endblock %}
+{% block content %}
+<section class="card" aria-label="Perfil del paciente">
+  <div class="row">
+    <h2>Perfil del paciente</h2>
+    <a class="btn sec chico" href="/perfil">Editar</a>
+  </div>
+  <p>{{ perfil.nombre }}, {{ perfil.edad }} años{% if perfil.cuidador %} · cuida: {{ perfil.cuidador }}{% endif %}</p>
+  <div class="chips">
+    {% for c in perfil.condiciones %}<span class="chip">{{ c }}</span>{% endfor %}
+    <span class="chip on">{{ 'Afiliado al IESS' if perfil.iess else 'Sin IESS' }}</span>
+  </div>
+</section>
+
+<section class="card" aria-label="Dosis de hoy">
+  <div style="display:flex;align-items:baseline;gap:10px">
+    <p class="grande">{{ dia.tomadas }} de {{ dia.total }}</p>
+    <p style="font-size:17px;font-weight:500">dosis tomadas hoy</p>
+  </div>
+  <div class="barra" role="progressbar" aria-valuenow="{{ dia.pct }}" aria-valuemin="0" aria-valuemax="100"><div style="width:{{ dia.pct }}%"></div></div>
+  <p class="muted">
+    {% if dia.siguiente %}Pendiente: {{ dia.siguiente.nombre }} a las {{ dia.siguiente.hora }}.{% else %}No quedan dosis pendientes por ahora.{% endif %}
+    {% if dia.sin_medicina %} La dosis de {{ dia.sin_medicina|map(attribute='nombre')|unique|join(', ') }} no se puede tomar: falta la medicina.{% endif %}
+  </p>
+</section>
+
+{% if pendiente_iess %}
+<section class="card aviso">
+  <h2>Falta registrar qué te entregó el IESS</h2>
+  <p>Nueva receta del {{ fecha_corta(visita.fecha) }}. Cuéntanos si te entregaron todo, una parte o nada.</p>
+  <a class="btn" href="/entrega">¿Te entregaron tu medicina?</a>
+</section>
+{% elif faltantes %}
+<section class="card alerta">
+  <h2 style="color:var(--red)">Falta comprar {{ faltantes|length }} medicamento{{ 's' if faltantes|length != 1 }}</h2>
+  <p>{% for x in faltantes %}<b>{{ x.nombre }}:</b> {{ x.motivo|replace('El IESS entregó', 'el IESS entregó')|replace('Sin stock', 'sin stock') }}{% if not loop.last %}<br>{% endif %}{% endfor %}</p>
+  <a class="btn rojo" href="/farmacias">Ver farmacia cercana</a>
+</section>
+{% else %}
+<section class="card ok"><h2>Todo al día</h2><p>No tienes medicinas pendientes por comprar.</p></section>
+{% endif %}
+
+<section class="card">
+  <h2>Próximos avisos</h2>
+  {% for c in compras %}
+  <div class="row"><p>Comprar {{ c.nombre }}</p><p style="font-weight:700;color:var(--blue)">antes del {{ fecha_corta(c.limite) }}</p></div>
+  {% endfor %}
+  {% if cita %}
+  <div class="row"><p>Control médico</p><p style="font-weight:700;color:var(--blue)">{{ fecha_corta(cita) }} · {{ cita[11:16] }}</p></div>
+  {% endif %}
+  {% if not compras and not cita %}<p class="muted">No hay avisos próximos.</p>{% endif %}
+</section>
+
+<section class="card">
+  <h2>Avisos en este dispositivo</h2>
+  <p class="muted" id="avisos-estado">Aún no activaste los avisos.</p>
+  <button type="button" class="btn sec chico" onclick="activarAvisos()">Activar notificaciones</button>
+</section>
+{% endblock %}

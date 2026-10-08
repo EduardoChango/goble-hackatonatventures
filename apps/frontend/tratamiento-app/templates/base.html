@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}Mi tratamiento{% endblock %}</title>
+<meta name="theme-color" content="#0E2A47">
+<link rel="manifest" href="/static/manifest.json">
+<link rel="icon" href="/static/icons/icon-192.png">
+<link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+<div class="phone">
+  <header class="top">{% block header %}{% endblock %}</header>
+  <main class="content">
+    {% if msg %}<div class="flash" role="status">{{ msg }}</div>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <nav class="tabs" aria-label="Menú principal">
+    <a href="/" class="{{ 'on' if activa == 'hoy' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>Hoy</a>
+    <a href="/receta" class="{{ 'on' if activa == 'receta' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h6"/></svg>Receta</a>
+    <a href="/plan" class="{{ 'on' if activa == 'plan' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Plan</a>
+    <a href="/farmacias" class="{{ 'on' if activa == 'farmacias' }}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>Farmacias</a>
+  </nav>
+
+  <!-- Aviso emergente dentro de la app -->
+  <div id="popup" class="popup" role="alert" hidden>
+    <h3 id="popup-titulo"></h3>
+    <p id="popup-cuerpo"></p>
+    <div class="acciones">
+      <button type="button" class="no" id="popup-cerrar">Después</button>
+      <button type="button" class="si" id="popup-accion">Ver</button>
+    </div>
+  </div>
+
+  <!-- Panel de demo: solo para la presentación -->
+  <button type="button" class="demo-btn" id="demo-abrir" aria-expanded="false" aria-controls="demo">Demo</button>
+  <div class="demo" id="demo" hidden>
+    <p>Controles para la presentación (no son parte de la app).</p>
+    <button type="button" data-accion="hora" data-hora="20:00">Simular que son las 20:00</button>
+    <button type="button" data-accion="hora" data-hora="21:00">Simular que son las 21:00</button>
+    <button type="button" data-accion="aviso" data-tipo="compra">Aviso de compra</button>
+    <button type="button" data-accion="aviso" data-tipo="cita">Aviso de cita médica</button>
+    <button type="button" data-accion="hora" data-hora="">Volver a la hora real</button>
+    <button type="button" class="peligro" data-accion="reset">Restablecer datos de ejemplo</button>
+  </div>
+</div>
+<script src="/static/js/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

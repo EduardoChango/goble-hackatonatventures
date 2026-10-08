@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Perfil del paciente{% endblock %}
+{% block header %}
+<p class="eyebrow">Perfil</p>
+<h1>Perfil del paciente</h1>
+<p class="sub">Lo completa el cuidador o un familiar.</p>
+{% endblock %}
+{% block content %}
+<form method="post" style="display:flex;flex-direction:column;gap:14px">
+  <div class="campo"><label for="nombre">Nombre del paciente</label>
+    <input id="nombre" name="nombre" type="text" value="{{ perfil.nombre }}" required></div>
+  <div class="dos">
+    <div class="campo" style="flex:1"><label for="edad">Edad</label>
+      <input id="edad" name="edad" type="number" min="0" max="120" value="{{ perfil.edad }}"></div>
+    <div class="campo" style="flex:2"><label for="cuidador">Quién lo cuida</label>
+      <input id="cuidador" name="cuidador" type="text" value="{{ perfil.cuidador }}"></div>
+  </div>
+  <div class="campo"><label for="condiciones">Condiciones (separadas por coma)</label>
+    <input id="condiciones" name="condiciones" type="text" value="{{ perfil.condiciones|join(', ') }}"></div>
+  <div class="campo">
+    <span id="l-iess" style="font-size:14px;font-weight:500;color:var(--muted)">¿Está afiliado al IESS?</span>
+    <div class="seg" role="radiogroup" aria-labelledby="l-iess">
+      <label><input type="radio" name="iess" value="si" {{ 'checked' if perfil.iess }}><span>Sí, afiliado</span></label>
+      <label><input type="radio" name="iess" value="no" {{ 'checked' if not perfil.iess }}><span>No</span></label>
+    </div>
+  </div>
+  <div class="campo"><label for="cita">Próxima cita médica</label>
+    <input id="cita" name="cita" type="datetime-local" value="{{ perfil.cita or '' }}"></div>
+  <div class="campo">
+    <span style="font-size:14px;font-weight:500;color:var(--muted)">Ubicación, para buscar la farmacia más cercana</span>
+    <button type="button" class="btn sec" onclick="usarUbicacion(false)">Usar mi ubicación actual</button>
+    <input type="hidden" id="lat" name="lat"><input type="hidden" id="lng" name="lng">
+    <p class="muted" id="ubic-estado" style="font-size:14px">Si no das acceso al GPS, se usa el centro de la ciudad.</p>
+  </div>
+  <div class="card" style="flex-direction:row;align-items:flex-start;gap:12px">
+    <input id="consent" name="consentimiento" type="checkbox" {{ 'checked' if perfil.consentimiento }} style="width:22px;height:22px;margin-top:2px;accent-color:var(--blue)">
+    <label for="consent" style="font-size:14px;line-height:1.4;color:var(--navy)">Confirmo que el paciente autoriza que se guarde y use su información de salud en esta app.</label>
+  </div>
+  <button class="btn" type="submit">Guardar perfil</button>
+</form>
+{% endblock %}
