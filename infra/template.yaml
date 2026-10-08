@@ -38,7 +38,7 @@ Parameters:
     Description: Tamaño de la instancia RDS PostgreSQL
   ClaudeModel:
     Type: String
-    Default: anthropic.claude-opus-5-5
+    Default: anthropic.claude-sonnet-5
     Description: Modelo de Claude en Bedrock para leer recetas (habilitar el acceso en la consola de Bedrock)
   BedrockRegion:
     Type: String

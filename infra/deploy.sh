@@ -13,7 +13,7 @@
 #   PROVIDER_API_URL  URL de la API externa real       (default: vacío)
 #   AWS_REGION        región                           (default: la del perfil o us-east-1)
 #   ARTIFACTS_BUCKET  bucket para los zips             (default: goble-artifacts-<account>-<region>)
-#   CLAUDE_MODEL      modelo de Bedrock                (default: anthropic.claude-opus-5-5)
+#   CLAUDE_MODEL      modelo de Bedrock                (default: anthropic.claude-sonnet-5)
 #   DB_RESET          1 = borra la BD y vuelve a cargar la data fake (default: 0)
 set -euo pipefail
 
@@ -28,7 +28,7 @@ ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
 BUCKET="${ARTIFACTS_BUCKET:-goble-artifacts-${ACCOUNT}-${REGION}}"
 PREFIX="goble/${ENV_NAME}"
 STACK="goble-${ENV_NAME}"
-CLAUDE_MODEL="${CLAUDE_MODEL:-anthropic.claude-opus-5-5}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-anthropic.claude-sonnet-5}"
 DB_RESET="${DB_RESET:-0}"
 # .venv del repo si existe; en Windows "python3" suele ser el atajo de la Microsoft Store
 if [ -x .venv/Scripts/python ]; then PYTHON=.venv/Scripts/python

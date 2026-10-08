@@ -6,7 +6,7 @@
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File infra\deploy.ps1
   powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -DbReset
-  powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -ClaudeModel anthropic.claude-sonnet-5-5
+  powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -ClaudeModel anthropic.claude-opus-4-8
 
 .NOTES
   Requiere AWS CLI v2 y credenciales en el entorno ($Env:AWS_ACCESS_KEY_ID, etc.).
@@ -18,7 +18,7 @@ param(
     [string]$ProviderApiUrl = "",
     [string]$Region = $Env:AWS_REGION,
     [string]$ArtifactsBucket = "",
-    [string]$ClaudeModel = "anthropic.claude-opus-5-5",
+    [string]$ClaudeModel = "anthropic.claude-sonnet-5",
     [switch]$DbReset  # borra la BD y vuelve a cargar la data fake
 )
 

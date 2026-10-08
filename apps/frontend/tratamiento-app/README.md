@@ -52,7 +52,7 @@ Pruebas automáticas (desde esta carpeta): `python -m pytest tests -v`. Con `DAT
 
 `ai.py` usa Claude si encuentra credenciales; si no, devuelve una receta de ejemplo:
 
-- **En AWS:** Claude en Amazon Bedrock (`AI_PROVIDER=bedrock`), con el rol IAM de la Lambda. El modelo se elige con `CLAUDE_MODEL` (por defecto `anthropic.claude-opus-5-5`).
+- **En AWS:** Claude en Amazon Bedrock (`AI_PROVIDER=bedrock`), con el rol IAM de la Lambda. El modelo se elige con `CLAUDE_MODEL` (por defecto `anthropic.claude-sonnet-5`).
 - **En local:** `$env:ANTHROPIC_API_KEY = "..."` para usar la API de Anthropic directamente.
 
 ## Guion de la demo (2 minutos)
