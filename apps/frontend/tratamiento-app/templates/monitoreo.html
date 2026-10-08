@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Centro de monitoreo{% endblock %}
+{% block header %}
+<p class="eyebrow">Abastecimiento continuo · {{ 'EventBridge' if modo == 'eventbridge' else 'modo local' }}</p>
+<h1>Centro de monitoreo</h1>
+<p class="sub">Hoy en la demo: {{ hoy.strftime('%d/%m/%Y') }}{% if simulado %} (simulado){% endif %} · <a href="/">Volver</a></p>
+{% endblock %}
+{% block content %}
+<section class="card" aria-label="Reloj de la demo">
+  <h2>Reloj de la demo</h2>
+  <form method="post" action="/monitoreo/evaluar"><button class="btn" type="submit">Evaluar ahora</button></form>
+  <form method="post" action="/monitoreo/simular" class="dos">
+    <input type="number" name="dias" value="10" min="1" max="60" style="flex:1" aria-label="Días">
+    <button class="btn sec" type="submit" style="flex:2">Simular + días</button>
+  </form>
+  {% if simulado %}<form method="post" action="/monitoreo/hoy"><button class="btn sec chico" type="submit">Volver a hoy</button></form>{% endif %}
+  <p class="muted" style="font-size:13px">En AWS el Scheduler también evalúa solo cada 2 minutos.</p>
+</section>
+
+<section class="card" aria-label="Pacientes">
+  <h2>Pacientes</h2>
+  {% for p in pacientes %}
+  {% set color = {'agotado': 'b-no', 'sin_respuesta_iess': 'b-pendiente', 'por_agotarse': 'b-parcial'}.get(p.estado, 'b-completo') %}
+  <div class="row" style="align-items:flex-start">
+    <div>
+      <p><b>{{ p.nombre }}</b></p>
+      <p class="muted" style="font-size:13px">
+        {% for m in p.meds if m.estado != 'ok' %}{{ m.nombre }}: {{ m.dias_restantes }} días{% if not loop.last %} · {% endif %}{% endfor %}
+      </p>
+    </div>
+    <span class="badge {{ color }}">{{ p.estado.replace('_', ' ') }}</span>
+  </div>
+  {% endfor %}
+</section>
+
+<section class="card" aria-label="Pedidos a Farmaenlace">
+  <h2>Pedidos a Farmaenlace</h2>
+  {% for p in pedidos %}
+  <div class="row" style="align-items:flex-start">
+    <div>
+      <p><b>{{ p.paciente }}</b> · {{ p.modo }}{% if p.origen == 'suscripcion' %} · automático{% endif %}</p>
+      <p class="muted" style="font-size:13px">{{ p.farmacia }} · {{ p.items }} · <b>{{ p.estado.replace('_', ' ') }}</b></p>
+    </div>
+    {% if p.ref_farmaenlace and p.estado in ('confirmado', 'en_camino', 'listo_para_retiro') %}
+    <form method="post" action="/monitoreo/avanzar/{{ p.ref_farmaenlace }}"><button class="btn sec chico" type="submit">Avanzar</button></form>
+    {% endif %}
+  </div>
+  {% else %}<p class="muted">Aún no hay pedidos. Prueba "Simular + 20 días": Patricio tiene abastecimiento automático.</p>{% endfor %}
+</section>
+
+<section class="card" aria-label="Eventos">
+  <h2>Eventos</h2>
+  {% for e in eventos %}
+  <p style="font-size:13px"><span class="muted">{{ e.creado_en.strftime('%H:%M:%S') }}</span>
+    <b>{{ e.detail_type }}</b> · {{ e.direccion }}{% if e.destino %} → {{ e.destino }}{% endif %}
+    {% if e.detail.paciente %} · {{ e.detail.paciente }}{% endif %}{% if e.detail.asunto %} · ✉ {{ e.detail.asunto }}{% endif %}</p>
+  {% endfor %}
+</section>
+{% endblock %}

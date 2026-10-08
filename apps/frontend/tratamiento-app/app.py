@@ -30,6 +30,8 @@ app.jinja_env.globals.update(
 if data.USAR_BD:  # API del módulo de abastecimiento (necesita PostgreSQL)
     from api_v1 import bp as api_v1  # noqa: E402
     app.register_blueprint(api_v1)
+    from monitoreo import bp as monitoreo  # noqa: E402
+    app.register_blueprint(monitoreo)
 
 PUBLICAS = {"login", "static", "service_worker"}
 
