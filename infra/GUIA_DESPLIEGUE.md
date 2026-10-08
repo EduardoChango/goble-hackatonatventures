@@ -6,7 +6,7 @@ Todos los comandos se ejecutan en **PowerShell** (no hace falta abrirlo como adm
 ```
 Navegador ──HTTPS──► API Gateway HTTP ──► Lambda Flask ─┬─► RDS PostgreSQL 17 (red privada)
                                                         └─► NAT ─► Claude en Bedrock (recetas)
-Lambda db-init ──► crea el esquema y carga los 11 pacientes de prueba
+Lambda db-init ──► crea el esquema y carga el catálogo de Farmaenlace y los 11 pacientes de prueba
 ```
 
 > **Costo:** mientras el stack existe, el NAT Gateway cuesta unos USD 1,10 al día y RDS unos USD 0,40 al día, aunque nadie use la app.
@@ -84,7 +84,7 @@ powershell -ExecutionPolicy Bypass -File infra\deploy.ps1
 | Empaquetar | Genera los zips en `build\artifacts\`. La primera vez descarga las dependencias para Linux (1-2 min) |
 | Subir | Crea el bucket `goble-artifacts-<cuenta>-<región>` y sube los zips |
 | CloudFormation | Crea el stack `goble-dev`: VPC, NAT, RDS, Lambdas y API. **Unos 15 minutos la primera vez** |
-| Base de datos | Invoca la Lambda `goble-dev-db-init`, que carga los 11 pacientes |
+| Base de datos | Invoca la Lambda `goble-dev-db-init`, que carga el catálogo de Farmaenlace (farmacias, medicinas y stock) y los 11 pacientes |
 
 Opciones útiles:
 

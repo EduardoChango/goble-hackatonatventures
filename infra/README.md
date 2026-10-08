@@ -16,7 +16,8 @@ Navegador ──HTTPS──► API Gateway HTTP ──► Lambda goble-<env>-tra
                                              ├──► RDS PostgreSQL 17 goble-<env>   (solo desde las Lambdas)
                                              └──► NAT ──► Claude en Bedrock (lectura de recetas)
 
-Lambda goble-<env>-db-init ──► crea el esquema y carga la data fake (db/init/*.sql)
+Lambda goble-<env>-db-init ──► crea el esquema y carga los datos: catálogo de Farmaenlace
+                               (db/datos_farmaenlace/) y pacientes de prueba (db/init/*.sql)
 ```
 
 | Recurso | Detalle |
