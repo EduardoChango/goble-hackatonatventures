@@ -27,15 +27,19 @@ conectan a él.
 │       ├── bff/                     #   Flask (backend-for-frontend)
 │       └── ui/                      #   Streamlit (solo habla con el BFF)
 │
-├── infra/                           # IaC: AWS CDK (Python)
-│   ├── app.py
-│   └── stacks/                      #   backend_stack (DynamoDB, Lambdas, API GW) | frontend_stack
+├── infra/                           # IaC: CloudFormation
+│   ├── template.yaml                #   DynamoDB + Layer + Lambdas + IAM + API Gateway
+│   └── deploy.sh                    #   empaqueta, sube a S3 y despliega
+│
+├── db/                              # PostgreSQL: esquema, vistas y data fake (ver db/README.md)
+│   ├── docker-compose.yml
+│   └── init/                        #   001_schema … 004_pacientes_fake (corren al crear el volumen)
 │
 ├── mocks/                           # DATA MOCKEADA
 │   ├── entrypoint/                  #   payloads de entrada + eventos de API Gateway
 │   └── external_apis/<api>/         #   respuestas simuladas de las APIs externas
 │
-├── scripts/                         # build_layer.py, invoke_local.py
+├── scripts/                         # package.py (zips para S3), invoke_local.py
 └── tests/                           # pytest (usa adapters in-memory + mocks)
 ```
 
@@ -68,8 +72,8 @@ cp .env.example .env
 | Invocar una lambda con un evento mock | `python scripts/invoke_local.py process_job mocks/entrypoint/events/process_job.json` |
 | Flask BFF (puerto 5000) | `cd apps/frontend && flask --app bff.app run --port 5000` |
 | Streamlit UI | `cd apps/frontend && streamlit run ui/app.py` |
-| Build del layer | `python scripts/build_layer.py` |
-| Deploy | `python scripts/build_layer.py && cd infra && pip install -r requirements.txt && cdk deploy --all -c env=dev -c use_mocks=true` |
+| Empaquetar layer y lambdas | `python scripts/package.py` |
+| Deploy a AWS | `ENV_NAME=dev USE_MOCKS=true bash infra/deploy.sh` (ver [infra/README.md](infra/README.md)) |
 
 Con `BACKEND_MODE=local` (valor por defecto), el BFF ejecuta los casos de uso en proceso, así que
 el frontend funciona completo sin AWS. Con `BACKEND_MODE=http` y `API_BASE_URL` apunta al API Gateway desplegado.
@@ -89,12 +93,12 @@ Ver [mocks/README.md](mocks/README.md) para agregar escenarios o nuevas APIs.
 2. Fábrica en `bootstrap/container.py`.
 3. `apps/lambdas/<nombre>/handler.py`: solo traduce el evento al caso de uso y la respuesta a HTTP.
 4. Evento de ejemplo en `mocks/entrypoint/events/`.
-5. Registrar la función en `infra/stacks/backend_stack.py`.
+5. En `infra/template.yaml`: agregar su rol, función, log group, método, permiso y parámetro `<Nombre>Key`. Luego agrégala a `LAMBDAS` en `scripts/package.py` y a `infra/deploy.sh`.
 
 ## ⚠️ Pendiente: hosting del frontend
 
 Amplify Hosting **no ejecuta servidores Python** (Flask o Streamlit). Solo sirve contenido estático y SSR de Node.
 Hay que decidir entre App Runner/ECS para el contenedor del frontend, o Flask como Lambda con una UI
-estática en Amplify. Ver `infra/stacks/frontend_stack.py`.
+estática en Amplify.
 
 > `Job` es una entidad placeholder: renómbrala al concepto real del negocio.

@@ -1,7 +1,0 @@
-{
-  "app": "python app.py",
-  "context": {
-    "env": "dev",
-    "use_mocks": "true"
-  }
-}
