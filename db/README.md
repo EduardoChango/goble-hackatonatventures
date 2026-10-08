@@ -18,7 +18,7 @@ docker compose -f db/docker-compose.yml up -d
 - **Zona horaria:** `America/Guayaquil`, para que `CURRENT_DATE` y las horas de las tomas cuadren con la app.
 - **Consola SQL:** `docker exec -it goble-postgres psql -U goble -d tratamiento`
 
-Los scripts de `init/` corren en orden **solo la primera vez**, cuando el volumen está vacío. En AWS los ejecuta la Lambda `db-init` (ver [infra/README.md](../infra/README.md)). Para resetear la data local:
+Los scripts de `init/` corren en orden **solo la primera vez**, cuando el volumen está vacío. Los datos de Farmaenlace (`datos_farmaenlace/`) los carga `init/001b_datos_farmaenlace.sh` justo después del esquema. En AWS los ejecuta la Lambda `db-init` (ver [infra/README.md](../infra/README.md)). Para resetear la data local:
 
 ```bash
 docker compose -f db/docker-compose.yml down -v
@@ -29,14 +29,17 @@ docker compose -f db/docker-compose.yml up -d
 
 | Archivo | Contenido |
 |---|---|
-| `init/001_schema.sql` | Enums, tablas, restricciones y vistas |
-| `init/002_catalogos.sql` | 2 cadenas, las 11 farmacias reales de Farmaenlace cerca de Puembo (de `farmacias.sql`), 8 medicamentos, stock simulado, promociones y condiciones |
+| `init/001_schema.sql` | Enums, tablas (incluye `farmacias`, `medicinas` y `stock`), restricciones y vistas |
+| `init/001b_datos_farmaenlace.sh` | Solo docker compose: carga `datos_farmaenlace/*.sql` en orden (la Lambda lo ignora y lo hace `db.py`) |
+| `init/002_catalogos.sql` | Condiciones y promociones (simuladas) |
 | `init/003_paciente_demo.sql` | Luis Mora (id 1), espejo exacto de `data.py::seed()` |
 | `init/004_pacientes_fake.sql` | **Generado.** 10 pacientes (ids 2-11), uno por caso |
 | `init/005_usuarios.sql` | **Generado.** Un usuario de login por paciente (contraseña `demo1234`) |
 | `init/999_sync_sequences.sql` | Alinea las secuencias tras insertar IDs fijos |
 | `gen_pacientes_fake.py` | Regenera `004` y `005` (determinista): `py db/gen_pacientes_fake.py` |
-| `farmacias.sql` | Fuente original de las farmacias (Google Maps). Su contenido ya está en `002` |
+| `datos_farmaenlace/farmacias.sql` | 11 farmacias reales de Farmaenlace (Económicas y Medicity) cerca de Puembo, de Google Maps (2026-10-08) |
+| `datos_farmaenlace/medicinas.sql` | 187 medicinas en 16 grupos (incluye insulina, levodopa, anticoagulantes). `uid` FE-xxxxx **provisional**; efectos secundarios y laboratorio por validar |
+| `datos_farmaenlace/stock.sql` | Stock **simulado**: 11 farmacias × 187 medicinas = 2.057 filas (`uid` FE-STK-xxxxxx). Contiene el bloque `@stock` |
 
 Los bloques `-- @paciente N` y `-- @stock` marcan qué partes de las semillas vuelve a ejecutar
 el botón **Restablecer datos** del panel Demo: borra al paciente de la sesión, lo vuelve a cargar
@@ -45,11 +48,11 @@ desde su bloque y repone el stock de las farmacias.
 ## Modelo
 
 ```
-cadena ─< farmacia ─< farmacia_stock >─ medicamento ─< promocion
-                │                            │
-usuario ── paciente ─< visita ─< receta_item >──────────┘
+farmacias ─< stock >─ medicinas ─< promocion
+    │                        │
+usuario ── paciente ─< visita ─< receta_item >┘
    │  │               │  ├── entrega_iess (1:1)
-   │  │               │  ├─< compra_item >─ compra >─ farmacia
+   │  │               │  ├─< compra_item >─ compra >─ farmacias
    │  │               │  └─< toma
    │  ├─< cita        │
    │  └─< aviso       │
@@ -62,7 +65,7 @@ usuario ── paciente ─< visita ─< receta_item >────────�
 | `paciente`, `paciente_condicion`, `cita` | `perfil`. La edad se calcula a partir de `fecha_nacimiento` |
 | `visita` + `receta_item` | `visitas[].meds[]` |
 | `entrega_iess` | `entregas[fecha][med]`. Sin filas = el IESS aún no responde |
-| `compra` + `compra_item` | `compras`. Comprar descuenta `farmacia_stock`, así que `vendido` desaparece |
+| `compra` + `compra_item` | `compras`. Comprar descuenta `stock`, así que `vendido` desaparece |
 | `toma` | `tomas[fecha]` (`"Losartán@08:00"`) |
 | `aviso` | `enviados` + `cola`. `mostrado_en IS NULL` = en cola |
 
@@ -106,12 +109,12 @@ SELECT nombre, horarios, total FROM v_receta_item_total WHERE paciente_id = 11;
 SELECT extraccion_ia -> 'medicamentos' FROM visita WHERE origen = 'ia';
 
 -- Farmacias con stock de lo que le falta al paciente 1
-SELECT c.nombre || ' · ' || f.sucursal AS farmacia, m.nombre_generico, s.unidades, ft.falta
+SELECT f.nombre AS farmacia, m.nombre, m.concentracion, s.cantidad, ft.falta
 FROM v_faltantes ft
-JOIN medicamento m    ON m.nombre_generico = ft.nombre
-JOIN farmacia_stock s ON s.medicamento_id = m.id
-JOIN farmacia f       ON f.id = s.farmacia_id
-JOIN cadena c         ON c.id = f.cadena_id
-WHERE ft.paciente_id = 1 AND s.unidades > 0
+JOIN receta_item ri ON ri.id = ft.receta_item_id
+JOIN medicinas m    ON m.uid = ri.uid_medicina
+JOIN stock s        ON s.uid_medicina = m.uid
+JOIN farmacias f    ON f.uid = s.uid_farmacia
+WHERE ft.paciente_id = 1 AND s.cantidad > 0
 ORDER BY farmacia;
 ```

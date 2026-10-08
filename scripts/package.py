@@ -4,7 +4,7 @@ Salida en build/artifacts/:
     layer-<hash>.zip         -> python/goble/... + mocks/external_apis/... (montado en /opt)
     process_job-<hash>.zip   -> handler.py
     get_job-<hash>.zip       -> handler.py
-    frontend-<hash>.zip      -> tratamiento-app + dependencias (Linux) + db/init como db_init/
+    frontend-<hash>.zip      -> tratamiento-app + dependencias (Linux) + db/init como db_init/ + db/datos_farmaenlace como db_datos/
     keys.env                 -> nombres de los zips (lo lee infra/deploy.sh)
 
 El hash depende del contenido: si el código no cambia, el nombre tampoco, y CloudFormation
@@ -87,7 +87,7 @@ def main() -> None:
 
     keys["FRONTEND_ZIP"] = build_zip(
         "frontend",
-        [(frontend_deps(), ""), (APP, "", APP_EXCLUIR), (ROOT / "db" / "init", "db_init/")],
+        [(frontend_deps(), ""), (APP, "", APP_EXCLUIR), (ROOT / "db" / "init", "db_init/"), (ROOT / "db" / "datos_farmaenlace", "db_datos/")],
     )
 
     (OUT / "keys.env").write_text("".join(f"{k}={v}\n" for k, v in keys.items()), encoding="utf-8")

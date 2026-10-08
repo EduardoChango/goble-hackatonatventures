@@ -14,6 +14,7 @@ Cada paciente va en un bloque "-- @paciente N": "Restablecer datos" re-ejecuta s
 import hashlib
 import json
 import random
+import re
 import unicodedata
 from datetime import date
 from pathlib import Path
@@ -26,6 +27,16 @@ rng = random.Random(2026)
 
 MED = {"Losartán": 1, "Metformina": 2, "Atorvastatina": 3, "Amlodipino": 4,
        "Enalapril": 5, "Glibenclamida": 6, "Levotiroxina": 7, "Omeprazol": 8}
+
+
+def uid_medicina(nombre, dosis):
+    """uid FE-xxxxx de la presentación (nombre + concentración) en db/datos_farmaenlace/medicinas.sql."""
+    texto = (INIT.parent / "datos_farmaenlace" / "medicinas.sql").read_text(encoding="utf-8")
+    for unidad in ("mg", "mcg"):
+        m = re.search(r"\('(FE-\d+)', '" + re.escape(nombre) + f"', '{dosis} {unidad}'", texto)
+        if m:
+            return m.group(1)
+    raise SystemExit(f"No hay {nombre} {dosis} en medicinas.sql")
 COND = {"Hipertensión": 1, "Diabetes tipo 2": 2, "Dislipidemia": 3,
         "Hipotiroidismo": 4, "Gastritis crónica": 5}
 HORARIOS = {24: ["08:00"], 12: ["08:00", "20:00"], 8: ["06:00", "14:00", "22:00"]}
@@ -187,8 +198,8 @@ def main():
             for it in items:
                 horarios = "{" + ",".join(it["horarios"]) + "}"
                 sql.append(
-                    "INSERT INTO receta_item (id, visita_id, medicamento_id, dosis_mg, cada_horas, dias, horarios) "
-                    f"VALUES ({item_id}, {visita_id}, {MED[it['nombre']]}, {it['dosis_mg']}, "
+                    "INSERT INTO receta_item (id, visita_id, uid_medicina, dosis_mg, cada_horas, dias, horarios) "
+                    f"VALUES ({item_id}, {visita_id}, '{uid_medicina(it['nombre'], it['dosis_mg'])}', {it['dosis_mg']}, "
                     f"{it['cada_horas']}, {it['dias']}, '{horarios}');")
                 if es_actual:
                     actuales[it["nombre"]] = (item_id, it)
@@ -207,7 +218,7 @@ def main():
                        + ", ".join(filas) + ";")
 
         for farmacia_id, modo, unidades in caso.get("compras", []):
-            sql.append("INSERT INTO compra (id, paciente_id, visita_id, farmacia_id, modo) VALUES "
+            sql.append("INSERT INTO compra (id, paciente_id, visita_id, uid_farmacia, modo) VALUES "
                        f"({compra_id}, {pid}, {visita_actual}, {farmacia_id}, '{modo}');")
             filas = ", ".join(f"({compra_id}, {actuales[m][0]}, {u})" for m, u in unidades.items())
             sql.append(f"INSERT INTO compra_item (compra_id, receta_item_id, unidades) VALUES {filas};")
