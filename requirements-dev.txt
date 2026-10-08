@@ -1,0 +1,5 @@
+-e packages/goble
+-r apps/frontend/requirements.txt
+pytest>=8.0
+ruff>=0.6
+boto3>=1.34

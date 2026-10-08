@@ -1,0 +1,1 @@
+# Dependencias propias de esta lambda (el core "goble" llega vía Lambda Layer)

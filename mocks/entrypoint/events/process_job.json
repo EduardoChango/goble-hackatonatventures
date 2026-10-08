@@ -1,0 +1,10 @@
+{
+  "resource": "/jobs",
+  "path": "/jobs",
+  "httpMethod": "POST",
+  "headers": { "Content-Type": "application/json" },
+  "pathParameters": null,
+  "queryStringParameters": null,
+  "body": "{\"reference\": \"REF-001\", \"customer_id\": \"C-123\", \"amount\": 150.0, \"currency\": \"USD\"}",
+  "isBase64Encoded": false
+}

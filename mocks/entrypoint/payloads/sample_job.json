@@ -1,0 +1,6 @@
+{
+  "reference": "REF-001",
+  "customer_id": "C-123",
+  "amount": 150.0,
+  "currency": "USD"
+}

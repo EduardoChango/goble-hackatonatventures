@@ -1,0 +1,9 @@
+{
+  "status_code": 200,
+  "body": {
+    "reference": "UNKNOWN",
+    "score": 0.5,
+    "status": "REVIEW",
+    "source": "mock-default"
+  }
+}
