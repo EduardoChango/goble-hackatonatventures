@@ -1,15 +1,7 @@
 -- Farmacias del grupo Farmaenlace (Farmacias Económicas y Medicity) cerca de Puembo, Quito.
--- Datos tomados de Google Maps el 2026-10-08: pueden cambiar. El stock NO está aquí.
--- Uso:  psql -d NOMBRE_BASE -f farmacias.sql
-
-CREATE TABLE IF NOT EXISTS farmacias (
-    uid       INTEGER PRIMARY KEY,                 -- número único
-    nombre    TEXT NOT NULL,                       -- nombre de la farmacia
-    direccion TEXT NOT NULL,
-    lat       DOUBLE PRECISION NOT NULL CHECK (lat  BETWEEN -90  AND 90),
-    long      DOUBLE PRECISION NOT NULL CHECK (long BETWEEN -180 AND 180),
-    horario   TEXT
-);
+-- Datos de Google Maps (2026-10-08): horarios y direcciones pueden cambiar.
+-- La tabla `farmacias` se crea en db/init/001_schema.sql; aquí solo van los datos.
+-- Carga manual:  psql -d tratamiento -f farmacias.sql   (orden: farmacias -> medicinas -> stock)
 
 INSERT INTO farmacias (uid, nombre, direccion, lat, long, horario) VALUES
  (1,  'Medicity Puembo',                          'Manuel Burbano, Puembo',                                         -0.1774634, -78.3588022, 'Lun-vie 8:00-20:30; sáb y dom 9:00-19:00'),

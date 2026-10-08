@@ -14,6 +14,8 @@ services:
     volumes:
       # Los .sql de init/ corren en orden alfabético SOLO la primera vez (volumen vacío)
       - ./init:/docker-entrypoint-initdb.d:ro
+      # farmacias.sql, medicinas.sql y stock.sql los carga init/001b_datos_farmaenlace.sh
+      - ./datos_farmaenlace:/datos_farmaenlace:ro
       - pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U goble -d tratamiento"]
