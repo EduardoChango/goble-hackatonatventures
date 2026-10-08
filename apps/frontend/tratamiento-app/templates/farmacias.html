@@ -23,6 +23,21 @@
   {% endfor %}
   <p class="muted" style="font-size:13px">Promociones de ejemplo.</p>
 </section>
+{% if pedido %}
+<section class="card" aria-label="Pedido del mes">
+  <h2>Repetir mi pedido del mes</h2>
+  <p class="muted" style="font-size:14px">Un mes de tu receta actual en una sola compra.</p>
+  {% for i in pedido['items'] %}
+  <div class="row"><p>{{ i.nombre }} {{ i.dosis_mg }} mg</p><p style="font-weight:700">{{ i.unidades }} u.</p></div>
+  {% endfor %}
+  <p class="muted" style="font-size:14px">{{ pedido.farmacia.nombre }} · {{ '%.1f'|format(pedido.dist) }} km{% if pedido.completo %} · <b style="color:#1F4D0B">Tiene todo</b>{% else %} · <b style="color:#6B3F00">Stock parcial</b>{% endif %}</p>
+  <form method="post" action="/farmacias/repetir" class="dos">
+    <button class="btn sec chico" type="submit" name="modo" value="recoger">Recoger yo</button>
+    <button class="btn chico" type="submit" name="modo" value="envio">Pedir envío</button>
+  </form>
+</section>
+{% endif %}
+
 {% if not faltantes %}
   <section class="card ok"><h2>No tienes nada por comprar</h2>
     <p>Cuando falte una medicina, aquí verás la farmacia Farmaenlace más cercana con stock.</p></section>
@@ -45,6 +60,7 @@
       <h3>{{ loop.index }} · {{ f.nombre }}</h3>
       <p style="font-weight:700;color:var(--blue);white-space:nowrap">{{ '%.1f'|format(f.dist) }} km</p>
     </div>
+    <p class="muted" style="font-size:14px">{{ f.direccion }} · {{ f.parroquia }}</p>
     <p class="muted" style="font-size:14px">{{ f.horario }}{% if f.completa %} · <b style="color:#1F4D0B">Tiene todo lo que falta</b>{% endif %}</p>
     {% for x in f.stock %}
     <div class="stockfila"><span>{{ x.nombre }} {{ x.dosis_mg }} mg</span>

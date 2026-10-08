@@ -30,6 +30,7 @@
   <p class="nota"><b>Desde la visita anterior:</b> {{ cambios|length }} cambio{{ 's' if cambios|length != 1 }}. La app solo registra lo que indica la receta.</p>
   {% endif %}
   {% if es_ultima %}<a class="btn" href="/entrega">Siguiente: ¿qué te entregaron?</a>{% endif %}
+  {% if filas %}<a class="btn sec" href="/resumen">Resumen para mi médico</a>{% endif %}
 
 {% elif modo == 'nueva' %}
   <form method="post" action="/receta/leer" enctype="multipart/form-data" class="card">

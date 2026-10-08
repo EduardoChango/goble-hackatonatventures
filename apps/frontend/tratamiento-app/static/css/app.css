@@ -108,3 +108,11 @@ nav.tabs svg { width: 24px; height: 24px; }
 .demo p { margin: 0; font-size: 13px; color: var(--muted); }
 .demo button { min-height: 42px; border-radius: 10px; border: 1px solid #B8C6D3; background: #fff; font: 500 14px 'DM Sans', Arial, sans-serif; color: var(--navy); cursor: pointer; }
 .demo button.peligro { color: var(--red); }
+
+/* Imprimir el resumen para el médico */
+@media print {
+  body { background: #fff; }
+  .phone { width: 100%; height: auto; overflow: visible; box-shadow: none; }
+  .content { overflow: visible; }
+  nav.tabs, .demo-btn, .demo, .popup, .btn { display: none !important; }
+}

@@ -274,3 +274,58 @@ def mapa(lat, lng, farmacias, ancho=350, alto=170, margen=28):
     ox = (ancho - rx * esc) / 2 - min(xs) * esc
     oy = (alto - ry * esc) / 2 - min(ys) * esc
     return [(round(x * esc + ox, 1), round(y * esc + oy, 1)) for x, y in zip(xs, ys)]
+
+
+# ---------- pedido recurrente ----------
+def pedido_mensual(s, lat, lng):
+    """Lo que se necesita para un mes con la receta actual y la mejor farmacia para pedirlo."""
+    v = visita_actual(s)
+    if not v or falta_respuesta_iess(s):
+        return None
+    items = [{"nombre": m["nombre"], "dosis_mg": m["dosis_mg"], "unidades": total_recetado(m)} for m in v["meds"]]
+    mejor = None
+    for f in FARMACIAS:
+        completo = all(stock_de(s, f, i["nombre"]) >= i["unidades"] for i in items)
+        clave = (not completo, km(lat, lng, f["lat"], f["lng"]))
+        if mejor is None or clave < mejor[0]:
+            mejor = (clave, f, completo)
+    if mejor is None:
+        return None
+    f = mejor[1]
+    return {"items": items, "farmacia": f, "dist": km(lat, lng, f["lat"], f["lng"]), "completo": mejor[2]}
+
+
+# ---------- resumen para el médico ----------
+def resumen_medico(s):
+    """Lo que el paciente debe contarle al médico en el control, con datos de la receta y del IESS."""
+    v = visita_actual(s)
+    if not v:
+        return None
+    previa = visita_previa(s, v["fecha"])
+    filas = comparar(v, previa)
+    frases = []
+    for m in filas:
+        if m["estado"] == "aumentada":
+            frases.append(f'Me aumentaron la {m["nombre"]}: {m["detalle"]}.')
+        elif m["estado"] == "reducida":
+            frases.append(f'Me redujeron la {m["nombre"]}: {m["detalle"]}.')
+        elif m["estado"] == "frecuencia":
+            frases.append(f'Cambió la frecuencia de {m["nombre"]}: ahora cada {m["cada_horas"]} h.')
+        elif m["estado"] == "nuevo":
+            frases.append(f'Me agregaron {m["nombre"]} {m["dosis_mg"]} mg.')
+        elif m["estado"] == "suspendido":
+            frases.append(f'Ya no tengo recetada la {m["nombre"]}.')
+    entregas = []
+    if s["perfil"].get("iess"):
+        for m in v["meds"]:
+            e = entrega_de(s, v["fecha"], m["nombre"])
+            total = total_recetado(m)
+            if not e:
+                continue
+            if e["estado"] == "no":
+                frases.append(f'El IESS no me entregó {m["nombre"]}.')
+            elif e["estado"] == "parcial":
+                frases.append(f'El IESS solo me entregó {int(e["recibido"])} de {total} de {m["nombre"]}.')
+            entregas.append({"nombre": m["nombre"], "estado": e["estado"], "recibido": int(e["recibido"]), "total": total})
+    return {"visita": v, "filas": filas, "frases": frases, "entregas": entregas,
+            "falta": faltantes(s), "previa": previa}

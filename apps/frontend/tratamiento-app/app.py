@@ -158,7 +158,9 @@ def farmacias():
     v = logic.visita_actual(s)
     mios = {m["nombre"] for m in (v["meds"] if v else [])}
     promos = sorted(({**x, "tuyo": x["med"] in mios} for x in data.PROMOS), key=lambda x: not x["tuyo"])
-    return pagina("farmacias.html", "farmacias", faltantes=f, lista=lista, puntos=puntos, promos=promos)
+    pedido = logic.pedido_mensual(s, lat, lng)
+    return pagina("farmacias.html", "farmacias", faltantes=f, lista=lista, puntos=puntos, promos=promos,
+                  pedido=pedido)
 
 
 @app.route("/farmacias/comprar", methods=["POST"])
@@ -179,6 +181,36 @@ def farmacias_comprar():
         data.save()
     accion = "enviarán a tu casa" if modo == "envio" else "reservamos para que recojas"
     return redirect(f"/?msg=Listo: te {accion} desde {farm['nombre'] if farm else 'la farmacia'}")
+
+
+@app.route("/farmacias/repetir", methods=["POST"])
+def farmacias_repetir():
+    """Repetir el pedido del mes: compra de un mes de cada medicina en la mejor farmacia."""
+    s = estado()
+    lat, lng = s["perfil"]["lat"], s["perfil"]["lng"]
+    pedido = logic.pedido_mensual(s, lat, lng)
+    modo = request.form.get("modo", "envio")
+    if pedido:
+        v = logic.visita_actual(s)
+        farm = pedido["farmacia"]
+        compras = s["compras"].setdefault(v["fecha"], {})
+        vendido = s.setdefault("vendido", {}).setdefault(str(farm["id"]), {})
+        for i in pedido["items"]:
+            u = min(logic.stock_de(s, farm, i["nombre"]), i["unidades"])
+            if u > 0:
+                compras[i["nombre"]] = compras.get(i["nombre"], 0) + u
+                vendido[i["nombre"]] = vendido.get(i["nombre"], 0) + u
+        data.save()
+        accion = "enviarán a tu casa" if modo == "envio" else "reservamos para que recojas"
+        return redirect(f"/?msg=Pedido del mes listo: te {accion} desde {farm['nombre']}")
+    return redirect("/farmacias")
+
+
+# ---------- Resumen para el médico ----------
+@app.route("/resumen")
+def resumen():
+    s = estado()
+    return pagina("resumen.html", "receta", r=logic.resumen_medico(s))
 
 
 @app.route("/api/ubicacion", methods=["POST"])
