@@ -14,6 +14,10 @@
 #   CLAUDE_MODEL      modelo de Bedrock                (default: anthropic.claude-sonnet-5)
 #   DB_RESET          1 = borra la BD y vuelve a cargar la data fake (default: 0)
 #   DB_INSTANCE_CLASS tamaño de RDS                    (default: db.t3.micro)
+#   FRECUENCIA_EVALUACION  Scheduler                   (default: rate(2 minutes); prod: cron(0 7 * * ? *))
+#   HABILITAR_SCHEDULER    true | false                (default: true)
+#   EMAIL_REMITENTE        remitente de SES            (default: vacío = emails simulados)
+#   EMAIL_DESTINO_DEMO     todos los emails a esta casilla (SES en sandbox)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -28,6 +32,10 @@ STACK="goble-${ENV_NAME}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-anthropic.claude-sonnet-5}"
 DB_RESET="${DB_RESET:-0}"
 DB_INSTANCE_CLASS="${DB_INSTANCE_CLASS:-db.t3.micro}"
+FRECUENCIA_EVALUACION="${FRECUENCIA_EVALUACION:-rate(2 minutes)}"
+HABILITAR_SCHEDULER="${HABILITAR_SCHEDULER:-true}"
+EMAIL_REMITENTE="${EMAIL_REMITENTE:-}"
+EMAIL_DESTINO_DEMO="${EMAIL_DESTINO_DEMO:-}"
 # .venv del repo si existe; en Windows "python3" suele ser el atajo de la Microsoft Store
 if [ -x .venv/Scripts/python ]; then PYTHON=.venv/Scripts/python
 elif [ -x .venv/bin/python ]; then PYTHON=.venv/bin/python
@@ -62,7 +70,11 @@ aws cloudformation deploy \
     ArtifactsBucket="$BUCKET" \
     FrontendKey="${PREFIX}/${FRONTEND_ZIP}" \
     ClaudeModel="$CLAUDE_MODEL" \
-    DbInstanceClass="$DB_INSTANCE_CLASS"
+    DbInstanceClass="$DB_INSTANCE_CLASS" \
+    FrecuenciaEvaluacion="$FRECUENCIA_EVALUACION" \
+    HabilitarScheduler="$HABILITAR_SCHEDULER" \
+    EmailRemitente="$EMAIL_REMITENTE" \
+    EmailDestinoDemo="$EMAIL_DESTINO_DEMO"
 
 echo ">> Base de datos (Lambda db-init)"
 if [ "$DB_RESET" = "1" ]; then PAYLOAD='{"forzar": true}'; else PAYLOAD='{}'; fi

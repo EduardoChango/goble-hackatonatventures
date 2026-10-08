@@ -83,13 +83,18 @@ def _al_evaluador(detail_type, detail):
     evaluador.evaluar(paciente_id=detail.get("paciente_id"), origen=detail_type)
 
 
+def _al_notificador(detail_type, detail):
+    from abastecimiento import notificador
+    notificador.notificar(detail_type, detail)
+
+
 def _sin_efecto(detail_type, detail):
     """Destinos externos que llegan en fases siguientes: en local basta con registrar la entrega."""
 
 
 _DESTINOS_LOCALES = {
     "evaluador": _al_evaluador,
-    "notificador": _sin_efecto,             # fase 3: email por SES
+    "notificador": _al_notificador,         # email por SES (o simulado si no hay remitente)
     "webhook-app-principal": _sin_efecto,   # fase 5: receptor de webhooks de demo
     "farmaenlace": _sin_efecto,             # fase 4: mock de Farmaenlace
 }

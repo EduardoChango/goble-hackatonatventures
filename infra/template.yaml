@@ -28,9 +28,32 @@ Parameters:
     Type: String
     Default: ""
     Description: Región de Bedrock; vacío = la región del stack
+  FrecuenciaEvaluacion:
+    Type: String
+    Default: rate(2 minutes)
+    Description: >-
+      Cada cuánto el Scheduler revisa a todos los pacientes. Demo: rate(2 minutes).
+      Producción: cron(0 7 * * ? *) (todos los días a las 07:00 de Ecuador)
+  HabilitarScheduler:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: false si la cuenta no permite EventBridge Scheduler (queda "Evaluar ahora" y la reevaluación por cambios)
+  EmailRemitente:
+    Type: String
+    Default: ""
+    Description: >-
+      Correo remitente de SES. AWS le envía un enlace de verificación. Vacío = los emails se simulan
+      (quedan en evento_log) y no se crea la identidad de SES
+  EmailDestinoDemo:
+    Type: String
+    Default: ""
+    Description: Si se define, TODOS los emails van a esta casilla (SES en sandbox solo entrega a correos verificados)
 
 Conditions:
   BedrockRegionDefault: !Equals [!Ref BedrockRegion, ""]
+  SchedulerActivo: !Equals [!Ref HabilitarScheduler, "true"]
+  HayEmailRemitente: !Not [!Equals [!Ref EmailRemitente, ""]]
 
 Resources:
   # ===========================================================================
@@ -226,6 +249,16 @@ Resources:
               - Effect: Allow
                 Action: bedrock-mantle:CreateInference # endpoint Messages API de Claude en Bedrock
                 Resource: "*"
+        - PolicyName: eventos-y-email
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: events:PutEvents
+                Resource: !GetAtt EventBus.Arn
+              - Effect: Allow
+                Action: ses:SendEmail
+                Resource: "*"
 
   FrontendFunction:
     Type: AWS::Lambda::Function
@@ -255,6 +288,7 @@ Resources:
           AI_PROVIDER: bedrock
           CLAUDE_MODEL: !Ref ClaudeModel
           BEDROCK_REGION: !If [BedrockRegionDefault, !Ref "AWS::Region", !Ref BedrockRegion]
+          EVENT_BUS_NAME: !Ref EventBus
 
   DbInitFunction:
     Type: AWS::Lambda::Function
@@ -311,10 +345,216 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FrontendHttpApi}/*
 
+  # ===========================================================================
+  # Módulo de abastecimiento: monitoreo continuo con EventBridge
+  #
+  #   Scheduler (FrecuenciaEvaluacion) ─┐
+  #   App: PacienteActualizado,         ├─> bus goble-<env>-abastecimiento ─┬─> evaluador ─> publica alertas
+  #        EvaluacionSolicitada ────────┘   (archivo 7 días para replay)    └─> notificador ─> SES
+  #   Eventos que no se pueden entregar tras los reintentos -> SQS DLQ
+  # ===========================================================================
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub goble-${EnvName}-abastecimiento
+
+  EventArchive:
+    Type: AWS::Events::Archive
+    Properties:
+      ArchiveName: !Sub goble-${EnvName}-abastecimiento
+      SourceArn: !GetAtt EventBus.Arn
+      RetentionDays: 7
+
+  EventosDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub goble-${EnvName}-eventos-dlq
+      MessageRetentionPeriod: 1209600 # 14 días
+
+  EventosDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref EventosDlq]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource: !GetAtt EventosDlq.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn: [!GetAtt ReglaEvaluador.Arn, !GetAtt ReglaNotificador.Arn]
+
+  EvaluadorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub goble-${EnvName}-evaluador
+      Description: Revisa el saldo de medicación y publica alertas (Scheduler, PacienteActualizado, EvaluacionSolicitada)
+      Runtime: python3.12
+      Handler: handlers.evaluador.handler
+      Role: !GetAtt AppRole.Arn
+      Timeout: 120
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Ref FrontendKey
+      VpcConfig:
+        SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: tratamiento
+          DB_USER: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+          DB_PASSWORD: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+          EVENT_BUS_NAME: !Ref EventBus
+
+  NotificadorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub goble-${EnvName}-notificador
+      Description: Envía por SES los avisos al cuidador y al paciente
+      Runtime: python3.12
+      Handler: handlers.notificador.handler
+      Role: !GetAtt AppRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Ref FrontendKey
+      VpcConfig:
+        SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: tratamiento
+          DB_USER: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+          DB_PASSWORD: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+          EVENT_BUS_NAME: !Ref EventBus
+          EMAIL_REMITENTE: !Ref EmailRemitente
+          EMAIL_DESTINO_DEMO: !Ref EmailDestinoDemo
+          APP_URL: !GetAtt FrontendHttpApi.ApiEndpoint
+
+  EvaluadorLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/goble-${EnvName}-evaluador
+      RetentionInDays: 14
+
+  NotificadorLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/goble-${EnvName}-notificador
+      RetentionInDays: 14
+
+  ReglaEvaluador:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub goble-${EnvName}-evaluador
+      Description: Reevaluar al paciente que cambió, o a todos (Evaluar ahora)
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source: [goble.abastecimiento]
+        detail-type: [PacienteActualizado, EvaluacionSolicitada]
+      Targets:
+        - Id: evaluador
+          Arn: !GetAtt EvaluadorFunction.Arn
+          RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 3600 }
+          DeadLetterConfig: { Arn: !GetAtt EventosDlq.Arn }
+
+  ReglaNotificador:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub goble-${EnvName}-notificador
+      Description: Avisar por email al cuidador y al paciente
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source: [goble.abastecimiento]
+        detail-type: [MedicacionPorAgotarse, EntregaIessIncompleta, PedidoActualizado]
+      Targets:
+        - Id: notificador
+          Arn: !GetAtt NotificadorFunction.Arn
+          RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 3600 }
+          DeadLetterConfig: { Arn: !GetAtt EventosDlq.Arn }
+
+  EvaluadorInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref EvaluadorFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ReglaEvaluador.Arn
+
+  NotificadorInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref NotificadorFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ReglaNotificador.Arn
+
+  # Monitoreo programado: en la demo cada 2 minutos; en producción una vez al día
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Condition: SchedulerActivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invocar-evaluador
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt EvaluadorFunction.Arn
+
+  EvaluacionProgramada:
+    Type: AWS::Scheduler::Schedule
+    Condition: SchedulerActivo
+    Properties:
+      Name: !Sub goble-${EnvName}-evaluacion
+      Description: Revisa el saldo de medicación de todos los pacientes
+      ScheduleExpression: !Ref FrecuenciaEvaluacion
+      ScheduleExpressionTimezone: America/Guayaquil
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt EvaluadorFunction.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"origen": "programado"}'
+        RetryPolicy: { MaximumRetryAttempts: 0 } # la próxima ejecución ya llega en minutos
+
+  EmailRemitenteIdentity:
+    Type: AWS::SES::EmailIdentity
+    Condition: HayEmailRemitente
+    Properties:
+      EmailIdentity: !Ref EmailRemitente
+
 Outputs:
   FrontendUrl:
     Description: URL pública (HTTPS) de la app Mi tratamiento
     Value: !GetAtt FrontendHttpApi.ApiEndpoint
+  EventBusName:
+    Description: Bus de eventos del módulo de abastecimiento
+    Value: !Ref EventBus
+  EvaluadorFunctionName:
+    Description: Lambda que revisa el saldo de medicación
+    Value: !Ref EvaluadorFunction
+  EventosDlqUrl:
+    Description: Eventos que no se pudieron entregar (debería estar vacía)
+    Value: !Ref EventosDlq
   DbInitFunctionName:
     Description: Lambda que crea el esquema y carga la data fake
     Value: !Ref DbInitFunction

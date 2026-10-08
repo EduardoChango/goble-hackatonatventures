@@ -2,6 +2,9 @@
 
 AWS: la invocan el Scheduler ({"origen": "programado"}) y las reglas de EventBridge para
 PacienteActualizado / EvaluacionSolicitada (evento con "detail-type" y "detail").
+Para la demo, invocándola a mano también mueve el reloj antes de evaluar:
+    {"avanzar_dias": 10}     simula +10 días
+    {"reloj": "hoy"}          vuelve a la fecha real
 
 Local (con DATABASE_URL):
     python -m handlers.evaluador                  # evalúa a todos con el reloj actual
@@ -29,6 +32,14 @@ def handler(event, _context=None):
     detail = event.get("detail") or {}
     origen = event.get("detail-type") or event.get("origen") or "programado"
     try:
+        if event.get("detail-type"):  # llegó por una regla de EventBridge: dejar constancia de la entrega
+            from abastecimiento import eventos
+            eventos.registrar(detail.get("evento_id", event.get("id", "")), "entregado", event["detail-type"],
+                              detail, "evaluador")
+        if event.get("reloj") == "hoy":
+            repo.fijar_fecha_referencia(None)
+        if event.get("avanzar_dias"):
+            repo.avanzar_dias(int(event["avanzar_dias"]))
         return evaluador.evaluar(paciente_id=detail.get("paciente_id"), origen=origen)
     finally:
         db.cerrar()

@@ -4,7 +4,7 @@
 
 | Archivo | Qué es |
 |---|---|
-| `template.yaml` | El stack de la app **Mi tratamiento**: VPC, RDS, Lambdas, API HTTP y permisos de Bedrock |
+| `template.yaml` | El stack de la app **Mi tratamiento**: VPC, RDS, Lambdas, API HTTP, Bedrock y el monitoreo con EventBridge |
 | `deploy.ps1` / `deploy.sh` | Empaqueta, sube los zips a S3, despliega el stack y carga la base de datos (PowerShell / bash) |
 | `../scripts/package.py` | Genera los zips en `build/artifacts/`. Las dependencias de la app se descargan para Linux |
 
@@ -18,6 +18,12 @@ Navegador ──HTTPS──► API Gateway HTTP ──► Lambda goble-<env>-tra
 
 Lambda goble-<env>-db-init ──► crea el esquema y carga los datos: catálogo de Farmaenlace
                                (db/datos_farmaenlace/) y pacientes de prueba (db/init/*.sql)
+
+Monitoreo continuo del abastecimiento:
+  Scheduler (cada 2 min en demo) ─┐
+  App: PacienteActualizado ───────┼─► bus goble-<env>-abastecimiento ─┬─► Lambda evaluador ─► publica alertas
+       EvaluacionSolicitada ──────┘   (archivo 7 días para replay)    └─► Lambda notificador ─► SES
+  Eventos que no se pudieron entregar tras 3 reintentos ─► SQS goble-<env>-eventos-dlq
 ```
 
 | Recurso | Detalle |
@@ -27,7 +33,10 @@ Lambda goble-<env>-db-init ──► crea el esquema y carga los datos: catálog
 | Secrets Manager | `goble-<env>/db` (usuario y contraseña de RDS) y `goble-<env>/flask-secret-key` (firma las cookies del login) |
 | Lambda Flask | Misma app que en local, vía `apig-wsgi`. `AI_PROVIDER=bedrock` |
 | API Gateway HTTP | Da la URL HTTPS que necesita la PWA (notificaciones y ubicación) |
-| IAM | `bedrock-mantle:CreateInference` para Claude en Bedrock |
+| IAM | `bedrock-mantle:CreateInference` (Claude), `events:PutEvents` (bus) y `ses:SendEmail` |
+| EventBridge | Bus `goble-<env>-abastecimiento` con archivo de 7 días, reglas hacia el evaluador y el notificador, DLQ en SQS |
+| EventBridge Scheduler | `goble-<env>-evaluacion`, con `FrecuenciaEvaluacion` (`rate(2 minutes)` en demo). Se omite con `-SinScheduler` |
+| SES | Identidad del remitente solo si se pasa `-EmailRemitente`. Sin ella, los avisos se simulan y quedan en `evento_log` |
 
 **Costo aproximado mientras el stack existe:** el NAT Gateway cuesta unos USD 1,10 al día y RDS unos USD 0,40 al día. Lambda, API Gateway y Bedrock se cobran por uso. **Borra el stack al terminar la demo.**
 
