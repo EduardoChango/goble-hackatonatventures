@@ -1,9 +1,11 @@
 # Infra: CloudFormation
 
+> **Paso a paso para desplegar y probar desde Windows:** [GUIA_DESPLIEGUE.md](GUIA_DESPLIEGUE.md)
+
 | Archivo | Qué es |
 |---|---|
 | `template.yaml` | Un solo stack: la app **Mi tratamiento** (VPC, RDS, Lambdas, API HTTP) y el backend `goble` (DynamoDB, Layer, Lambdas, API REST) |
-| `deploy.sh` | Empaqueta, sube los zips a S3, despliega el stack y carga la base de datos |
+| `deploy.ps1` / `deploy.sh` | Empaqueta, sube los zips a S3, despliega el stack y carga la base de datos (PowerShell / bash) |
 | `../scripts/package.py` | Genera los zips en `build/artifacts/`. Las dependencias de la app se descargan para Linux |
 
 ## App "Mi tratamiento"

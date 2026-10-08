@@ -36,12 +36,18 @@ def entrar(client, email="luis.mora@demo.ec", password="demo1234"):
     return client.post("/login", data={"email": email, "password": password})
 
 
-def stock(farmacia_id, med):
+def stock(farmacia_id, med, paciente_id=1):
+    """Stock en la farmacia de la presentación que el paciente tiene en su receta actual (p. ej. Metformina 850 mg)."""
     import db
     c = db.conectar()
     try:
-        return c.execute("""SELECT s.unidades FROM farmacia_stock s JOIN medicamento m ON m.id = s.medicamento_id
-                            WHERE s.farmacia_id = %s AND m.nombre_generico = %s""", (farmacia_id, med)).fetchone()["unidades"]
+        return c.execute("""
+            SELECT s.cantidad FROM stock s
+            WHERE s.uid_farmacia = %s AND s.uid_medicina = (
+                SELECT ri.uid_medicina FROM receta_item ri
+                JOIN medicinas m ON m.uid = ri.uid_medicina
+                JOIN v_visita_actual va ON va.id = ri.visita_id
+                WHERE va.paciente_id = %s AND m.nombre = %s)""", (farmacia_id, paciente_id, med)).fetchone()["cantidad"]
     finally:
         c.close()
 
