@@ -29,6 +29,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+# El AWS CLI en Windows lee el template con cp1252 y falla con caracteres UTF-8 (tildes, diagramas)
+$Env:AWS_CLI_FILE_ENCODING = "UTF-8"
 Set-Location (Split-Path $PSScriptRoot -Parent)
 
 # Ejecuta un comando nativo y corta el script si falla

@@ -19,6 +19,8 @@
 #   EMAIL_REMITENTE        remitente de SES            (default: vacío = emails simulados)
 #   EMAIL_DESTINO_DEMO     todos los emails a esta casilla (SES en sandbox)
 set -euo pipefail
+# El AWS CLI en Windows lee el template con cp1252 y falla con caracteres UTF-8 (tildes, diagramas)
+export AWS_CLI_FILE_ENCODING=UTF-8
 
 cd "$(dirname "$0")/.."
 
