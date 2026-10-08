@@ -117,36 +117,36 @@ def cargar():
 
     visitas = {}
     for r in _todos("""
-            SELECT to_char(v.fecha, 'YYYY-MM-DD') AS fecha, m.nombre_generico AS nombre, ri.dosis_mg,
+            SELECT to_char(v.fecha, 'YYYY-MM-DD') AS fecha, m.nombre AS nombre, ri.dosis_mg,
                    ri.cada_horas, ri.dias,
                    ARRAY(SELECT to_char(h, 'HH24:MI') FROM unnest(ri.horarios) h ORDER BY h) AS horarios
             FROM visita v JOIN receta_item ri ON ri.visita_id = v.id
-            JOIN medicamento m ON m.id = ri.medicamento_id
+            JOIN medicinas m ON m.uid = ri.uid_medicina
             WHERE v.paciente_id = %s ORDER BY v.fecha, ri.id""", pid):
         fecha = r.pop("fecha")
         visitas.setdefault(fecha, []).append(r)
 
     entregas = {}
     for r in _todos("""
-            SELECT to_char(v.fecha, 'YYYY-MM-DD') AS fecha, m.nombre_generico AS nombre,
+            SELECT to_char(v.fecha, 'YYYY-MM-DD') AS fecha, m.nombre AS nombre,
                    e.estado::text AS estado, e.unidades_recibidas AS recibido
             FROM entrega_iess e JOIN receta_item ri ON ri.id = e.receta_item_id
-            JOIN visita v ON v.id = ri.visita_id JOIN medicamento m ON m.id = ri.medicamento_id
+            JOIN visita v ON v.id = ri.visita_id JOIN medicinas m ON m.uid = ri.uid_medicina
             WHERE v.paciente_id = %s""", pid):
         entregas.setdefault(r["fecha"], {})[r["nombre"]] = {"estado": r["estado"], "recibido": r["recibido"]}
 
     compras = {}
     for r in _todos("""
-            SELECT to_char(v.fecha, 'YYYY-MM-DD') AS fecha, m.nombre_generico AS nombre, sum(ci.unidades)::int AS u
+            SELECT to_char(v.fecha, 'YYYY-MM-DD') AS fecha, m.nombre AS nombre, sum(ci.unidades)::int AS u
             FROM compra_item ci JOIN receta_item ri ON ri.id = ci.receta_item_id
-            JOIN visita v ON v.id = ri.visita_id JOIN medicamento m ON m.id = ri.medicamento_id
+            JOIN visita v ON v.id = ri.visita_id JOIN medicinas m ON m.uid = ri.uid_medicina
             WHERE v.paciente_id = %s GROUP BY 1, 2""", pid):
         compras.setdefault(r["fecha"], {})[r["nombre"]] = r["u"]
 
     tomas = [r["id"] for r in _todos("""
-        SELECT m.nombre_generico || '@' || to_char(t.hora, 'HH24:MI') AS id
+        SELECT m.nombre || '@' || to_char(t.hora, 'HH24:MI') AS id
         FROM toma t JOIN receta_item ri ON ri.id = t.receta_item_id
-        JOIN visita v ON v.id = ri.visita_id JOIN medicamento m ON m.id = ri.medicamento_id
+        JOIN visita v ON v.id = ri.visita_id JOIN medicinas m ON m.uid = ri.uid_medicina
         WHERE v.paciente_id = %s AND t.fecha = %s""", pid, hoy)]
     enviados = [r["clave"] for r in _todos(
         "SELECT clave FROM aviso WHERE paciente_id = %s AND clave LIKE %s", pid, hoy.isoformat() + "|%")]
@@ -163,25 +163,28 @@ def cargar():
         "visitas": [{"fecha": f, "meds": meds} for f, meds in visitas.items()],
         "entregas": entregas,
         "compras": compras,
-        "vendido": {},  # en BD comprar descuenta farmacia_stock directamente
+        "vendido": {},  # en BD comprar descuenta stock directamente
         "tomas": {hoy.isoformat(): tomas},
         "enviados": enviados,
         "cola": cola,
         "sim_hora": None,
     }
 
-    farmacias = [{**r, "stock": r["stock"] or {}} for r in _todos("""
-        SELECT f.id, c.nombre || ' · ' || f.sucursal AS nombre, f.parroquia, f.direccion,
-               f.lat::float AS lat, f.lng::float AS lng,
-               'Abierta hasta las ' || to_char(f.hora_cierre, 'HH24:MI') AS horario,
-               (SELECT jsonb_object_agg(m.nombre_generico, s.unidades)
-                FROM farmacia_stock s JOIN medicamento m ON m.id = s.medicamento_id
-                WHERE s.farmacia_id = f.id) AS stock
-        FROM farmacia f JOIN cadena c ON c.id = f.cadena_id ORDER BY f.id""")]
+    # stock por nombre, solo de las presentaciones de la receta actual (p. ej. Losartán 100 mg si esa es la dosis)
+    farmacias = [{**r, "stock": r["stock"] or {}} for r in _todos(r"""
+        SELECT f.uid AS id, f.nombre, ''::text AS parroquia, f.direccion,
+               f.lat, f.long AS lng,
+               COALESCE('Abierta hasta las ' || (regexp_match(f.horario, '-\s*(\d{1,2}:\d{2})'))[1],
+                        f.horario, 'Horario por confirmar') AS horario,
+               (SELECT jsonb_object_agg(m.nombre, s.cantidad)
+                FROM stock s JOIN medicinas m ON m.uid = s.uid_medicina
+                WHERE s.uid_farmacia = f.uid
+                  AND s.uid_medicina IN (SELECT uid_medicina FROM receta_item WHERE visita_id = %s)) AS stock
+        FROM farmacias f ORDER BY f.uid""", _visita_actual_id(pid))]
     promos = [{"titulo": r["titulo"], "detalle": r["detalle"], "med": r["med"], "vence": _vence(r["vigente_hasta"])}
               for r in _todos("""
-                SELECT pr.titulo, pr.detalle, m.nombre_generico AS med, pr.vigente_hasta
-                FROM promocion pr LEFT JOIN medicamento m ON m.id = pr.medicamento_id ORDER BY pr.id""")]
+                SELECT pr.titulo, pr.detalle, m.nombre AS med, pr.vigente_hasta
+                FROM promocion pr LEFT JOIN medicinas m ON m.uid = pr.uid_medicina ORDER BY pr.id""")]
     return estado, farmacias, promos
 
 
@@ -191,11 +194,23 @@ def _visita_actual_id(pid):
     return r["id"] if r else None
 
 
-def _medicamento_id(nombre):
-    r = _uno("SELECT id FROM medicamento WHERE lower(nombre_generico) = lower(%s)", nombre)
-    if r:
-        return r["id"]
-    return _uno("INSERT INTO medicamento (nombre_generico) VALUES (%s) RETURNING id", nombre)["id"]
+def _medicina_uid(nombre, dosis_mg=None):
+    """uid de la presentación (nombre + concentración); si no está en el catálogo, la crea."""
+    if dosis_mg is not None:
+        r = _uno("""SELECT uid FROM medicinas WHERE lower(nombre) = lower(%s)
+                    AND concentracion IN (%s || ' mg', %s || ' mcg') ORDER BY uid LIMIT 1""",
+                 nombre, str(dosis_mg), str(dosis_mg))
+        if r:
+            return r["uid"]
+    r = _uno("SELECT uid FROM medicinas WHERE lower(nombre) = lower(%s) ORDER BY uid LIMIT 1", nombre)
+    if r and dosis_mg is None:
+        return r["uid"]
+    uid = _uno("""SELECT 'FE-' || lpad((COALESCE(max(substr(uid, 4)::int), 0) + 1)::text, 5, '0') AS uid
+                  FROM medicinas WHERE uid ~ '^FE-[0-9]+$'""")["uid"]
+    return _uno("""INSERT INTO medicinas (uid, nombre, concentracion, unidad)
+                   VALUES (%s, %s, %s, 'tableta') ON CONFLICT (nombre, concentracion) DO UPDATE
+                   SET nombre = medicinas.nombre RETURNING uid""",
+                uid, nombre, f"{dosis_mg} mg" if dosis_mg is not None else "por definir")["uid"]
 
 
 def guardar_perfil(perfil):
@@ -240,12 +255,12 @@ def guardar_receta(fecha, meds, origen="manual", extraccion=None):
                    pid, fecha, origen, Jsonb(extraccion) if extraccion else None)["id"]
         vistos = set()
         for m in meds:
-            mid = _medicamento_id(m["nombre"])
-            if mid in vistos:  # el mismo medicamento dos veces en el formulario
+            if m["nombre"].lower() in vistos:  # el mismo medicamento dos veces en el formulario
                 continue
-            vistos.add(mid)
+            vistos.add(m["nombre"].lower())
+            mid = _medicina_uid(m["nombre"], m["dosis_mg"])
             horarios = m.get("horarios") or HORARIOS_POR_DEFECTO.get(int(m["cada_horas"]), ["08:00"])
-            _c().execute("""INSERT INTO receta_item (visita_id, medicamento_id, dosis_mg, cada_horas, dias, horarios)
+            _c().execute("""INSERT INTO receta_item (visita_id, uid_medicina, dosis_mg, cada_horas, dias, horarios)
                             VALUES (%s, %s, %s, %s, %s, %s::time[])""",
                          (vid, mid, m["dosis_mg"], m["cada_horas"], m["dias"], horarios))
 
@@ -257,8 +272,8 @@ def registrar_entrega(fecha, registro):
             _c().execute("""
                 INSERT INTO entrega_iess (receta_item_id, estado, unidades_recibidas)
                 SELECT ri.id, %s, %s FROM receta_item ri
-                JOIN visita v ON v.id = ri.visita_id JOIN medicamento m ON m.id = ri.medicamento_id
-                WHERE v.paciente_id = %s AND v.fecha = %s AND m.nombre_generico = %s
+                JOIN visita v ON v.id = ri.visita_id JOIN medicinas m ON m.uid = ri.uid_medicina
+                WHERE v.paciente_id = %s AND v.fecha = %s AND m.nombre = %s
                 ON CONFLICT (receta_item_id) DO UPDATE
                 SET estado = EXCLUDED.estado, unidades_recibidas = EXCLUDED.unidades_recibidas, registrado_en = now()
             """, (e["estado"], int(e["recibido"]), pid, fecha, nombre))
@@ -272,20 +287,22 @@ def registrar_compra(farmacia_id, modo, unidades):
     if not unidades or vid is None:
         return
     with _c().transaction():
-        cid = _uno("""INSERT INTO compra (paciente_id, visita_id, farmacia_id, modo)
+        cid = _uno("""INSERT INTO compra (paciente_id, visita_id, uid_farmacia, modo)
                       VALUES (%s, %s, %s, %s) RETURNING id""",
                    pid, vid, farmacia_id, modo if modo in ("recoger", "envio") else "recoger")["id"]
         for nombre, u in unidades.items():
             _c().execute("""
                 INSERT INTO compra_item (compra_id, receta_item_id, unidades)
-                SELECT %s, ri.id, %s FROM receta_item ri JOIN medicamento m ON m.id = ri.medicamento_id
-                WHERE ri.visita_id = %s AND m.nombre_generico = %s
+                SELECT %s, ri.id, %s FROM receta_item ri JOIN medicinas m ON m.uid = ri.uid_medicina
+                WHERE ri.visita_id = %s AND m.nombre = %s
                 ON CONFLICT (compra_id, receta_item_id) DO UPDATE SET unidades = compra_item.unidades + EXCLUDED.unidades
             """, (cid, u, vid, nombre))
             _c().execute("""
-                UPDATE farmacia_stock SET unidades = GREATEST(unidades - %s, 0)
-                WHERE farmacia_id = %s AND medicamento_id = (SELECT id FROM medicamento WHERE nombre_generico = %s)
-            """, (u, farmacia_id, nombre))
+                UPDATE stock SET cantidad = GREATEST(cantidad - %s, 0)
+                WHERE uid_farmacia = %s AND uid_medicina = (
+                    SELECT ri.uid_medicina FROM receta_item ri JOIN medicinas m ON m.uid = ri.uid_medicina
+                    WHERE ri.visita_id = %s AND m.nombre = %s)
+            """, (u, farmacia_id, vid, nombre))
 
 
 def registrar_toma(did):
@@ -294,8 +311,8 @@ def registrar_toma(did):
     pid = _pid()
     _c().execute("""
         INSERT INTO toma (receta_item_id, fecha, hora)
-        SELECT ri.id, %s, %s FROM receta_item ri JOIN medicamento m ON m.id = ri.medicamento_id
-        WHERE ri.visita_id = %s AND m.nombre_generico = %s
+        SELECT ri.id, %s, %s FROM receta_item ri JOIN medicinas m ON m.uid = ri.uid_medicina
+        WHERE ri.visita_id = %s AND m.nombre = %s
         ON CONFLICT (receta_item_id, fecha, hora) DO NOTHING
     """, (date.today(), hora, _visita_actual_id(pid), nombre))
 
@@ -323,16 +340,36 @@ def encolar_aviso(a):
 
 
 # ---------- semillas: inicializar la BD y "Restablecer datos" ----------
-def dir_semillas():
-    """db/init del repo en local; en la Lambda se empaqueta como db_init/ junto a la app."""
+def _dir(nombre_repo, nombre_zip, env):
     aqui = Path(__file__).resolve().parent
-    candidatos = [os.getenv("DB_INIT_DIR"), aqui / "db_init"]
-    if len(aqui.parents) > 2:  # repo: apps/frontend/tratamiento-app -> db/init
-        candidatos.append(aqui.parents[2] / "db" / "init")
+    candidatos = [os.getenv(env), aqui / nombre_zip]
+    if len(aqui.parents) > 2:  # repo: apps/frontend/tratamiento-app -> db/<nombre_repo>
+        candidatos.append(aqui.parents[2] / "db" / nombre_repo)
     for d in candidatos:
         if d and Path(d).is_dir():
             return Path(d)
-    raise FileNotFoundError("No encuentro los .sql de db/init (define DB_INIT_DIR)")
+    raise FileNotFoundError(f"No encuentro db/{nombre_repo} (define {env})")
+
+
+def dir_semillas():
+    """db/init del repo en local; en la Lambda se empaqueta como db_init/ junto a la app."""
+    return _dir("init", "db_init", "DB_INIT_DIR")
+
+
+def dir_datos_farmaenlace():
+    """db/datos_farmaenlace (farmacias, medicinas, stock); en la Lambda: db_datos/."""
+    return _dir("datos_farmaenlace", "db_datos", "DB_DATOS_DIR")
+
+
+def archivos_sql():
+    """Orden de carga: esquema (001) -> datos Farmaenlace (farmacias, medicinas, stock) -> resto de init/."""
+    init = sorted(dir_semillas().glob("*.sql"))
+    datos = dir_datos_farmaenlace()
+    farmaenlace = [datos / f"{n}.sql" for n in ("farmacias", "medicinas", "stock")]
+    faltan = [a.name for a in farmaenlace if not a.is_file()]
+    if faltan:
+        raise FileNotFoundError(f"Faltan {faltan} en {datos}")
+    return init[:1] + farmaenlace + init[1:]
 
 
 def _bloques(texto):
@@ -353,7 +390,7 @@ def reset():
     pid = _pid()
     with _c().transaction():
         _c().execute("DELETE FROM paciente WHERE id = %s", (pid,))  # en cascada: recetas, tomas, avisos, usuario...
-        for archivo in sorted(dir_semillas().glob("*.sql")):
+        for archivo in archivos_sql():
             bloques = _bloques(archivo.read_text(encoding="utf-8"))
             for etiqueta in (f"paciente {pid}", "stock"):
                 if etiqueta in bloques:
@@ -362,7 +399,7 @@ def reset():
 
 def inicializar(forzar=False):
     """Crea el esquema y carga la data fake (db/init/*.sql en orden). Lo usa dbinit.py."""
-    archivos = sorted(dir_semillas().glob("*.sql"))  # antes de tocar la BD
+    archivos = archivos_sql()  # antes de tocar la BD
     if not archivos:
         raise FileNotFoundError("No hay archivos .sql en " + str(dir_semillas()))
     c = conectar()

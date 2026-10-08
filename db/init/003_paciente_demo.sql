@@ -20,14 +20,14 @@ INSERT INTO visita (id, paciente_id, fecha, origen) VALUES
     (1, 1, '2026-09-12', 'manual'),
     (2, 1, '2026-10-03', 'manual');
 
-INSERT INTO receta_item (id, visita_id, medicamento_id, dosis_mg, cada_horas, dias, horarios) VALUES
+INSERT INTO receta_item (id, visita_id, uid_medicina, dosis_mg, cada_horas, dias, horarios) VALUES
     -- visita 2026-09-12
-    (1, 1, 1,   50, 24, 30, '{08:00}'),
-    (2, 1, 2,  850, 12, 30, '{08:00,20:00}'),
+    (1, 1, 'FE-00001',   50, 24, 30, '{08:00}'),
+    (2, 1, 'FE-00052',  850, 12, 30, '{08:00,20:00}'),
     -- visita 2026-10-03: Losartán aumenta a 100 mg, Atorvastatina es nuevo
-    (3, 2, 1,  100, 24, 30, '{08:00}'),
-    (4, 2, 2,  850, 12, 30, '{08:00,20:00}'),
-    (5, 2, 3,   20, 24, 30, '{21:00}');
+    (3, 2, 'FE-00002',  100, 24, 30, '{08:00}'),
+    (4, 2, 'FE-00052',  850, 12, 30, '{08:00,20:00}'),
+    (5, 2, 'FE-00035',   20, 24, 30, '{21:00}');
 
 -- Qué entregó el IESS para la visita 2026-10-03
 INSERT INTO entrega_iess (receta_item_id, estado, unidades_recibidas) VALUES
