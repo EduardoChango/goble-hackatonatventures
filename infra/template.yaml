@@ -28,9 +28,32 @@ Parameters:
     Type: String
     Default: ""
     Description: Región de Bedrock; vacío = la región del stack
+  FrecuenciaEvaluacion:
+    Type: String
+    Default: rate(2 minutes)
+    Description: >-
+      Cada cuánto el Scheduler revisa a todos los pacientes. Demo: rate(2 minutes).
+      Producción: cron(0 7 * * ? *) (todos los días a las 07:00 de Ecuador)
+  HabilitarScheduler:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: false si la cuenta no permite EventBridge Scheduler (queda "Evaluar ahora" y la reevaluación por cambios)
+  EmailRemitente:
+    Type: String
+    Default: ""
+    Description: >-
+      Correo remitente de SES. AWS le envía un enlace de verificación. Vacío = los emails se simulan
+      (quedan en evento_log) y no se crea la identidad de SES
+  EmailDestinoDemo:
+    Type: String
+    Default: ""
+    Description: Si se define, TODOS los emails van a esta casilla (SES en sandbox solo entrega a correos verificados)
 
 Conditions:
   BedrockRegionDefault: !Equals [!Ref BedrockRegion, ""]
+  SchedulerActivo: !Equals [!Ref HabilitarScheduler, "true"]
+  HayEmailRemitente: !Not [!Equals [!Ref EmailRemitente, ""]]
 
 Resources:
   # ===========================================================================
@@ -226,6 +249,16 @@ Resources:
               - Effect: Allow
                 Action: bedrock-mantle:CreateInference # endpoint Messages API de Claude en Bedrock
                 Resource: "*"
+        - PolicyName: eventos-y-email
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: events:PutEvents
+                Resource: !GetAtt EventBus.Arn
+              - Effect: Allow
+                Action: ses:SendEmail
+                Resource: "*"
 
   FrontendFunction:
     Type: AWS::Lambda::Function
@@ -255,6 +288,8 @@ Resources:
           AI_PROVIDER: bedrock
           CLAUDE_MODEL: !Ref ClaudeModel
           BEDROCK_REGION: !If [BedrockRegionDefault, !Ref "AWS::Region", !Ref BedrockRegion]
+          EVENT_BUS_NAME: !Ref EventBus
+          FARMAENLACE_WEBHOOK_SECRET: !Sub "{{resolve:secretsmanager:${FarmaenlaceWebhookSecret}}}"
 
   DbInitFunction:
     Type: AWS::Lambda::Function
@@ -311,10 +346,379 @@ Resources:
       Principal: apigateway.amazonaws.com
       SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FrontendHttpApi}/*
 
+  # ===========================================================================
+  # Módulo de abastecimiento: monitoreo continuo con EventBridge
+  #
+  #   Scheduler (FrecuenciaEvaluacion) ─┐
+  #   App: PacienteActualizado,         ├─> bus goble-<env>-abastecimiento ─┬─> evaluador ─> publica alertas
+  #        EvaluacionSolicitada ────────┘   (archivo 7 días para replay)    └─> notificador ─> SES
+  #   Eventos que no se pueden entregar tras los reintentos -> SQS DLQ
+  # ===========================================================================
+  EventBus:
+    Type: AWS::Events::EventBus
+    Properties:
+      Name: !Sub goble-${EnvName}-abastecimiento
+
+  EventArchive:
+    Type: AWS::Events::Archive
+    Properties:
+      ArchiveName: !Sub goble-${EnvName}-abastecimiento
+      SourceArn: !GetAtt EventBus.Arn
+      RetentionDays: 7
+
+  EventosDlq:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub goble-${EnvName}-eventos-dlq
+      MessageRetentionPeriod: 1209600 # 14 días
+
+  EventosDlqPolicy:
+    Type: AWS::SQS::QueuePolicy
+    Properties:
+      Queues: [!Ref EventosDlq]
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sqs:SendMessage
+            Resource: !GetAtt EventosDlq.Arn
+            Condition:
+              ArnEquals:
+                aws:SourceArn:
+                  - !GetAtt ReglaEvaluador.Arn
+                  - !GetAtt ReglaNotificador.Arn
+                  - !GetAtt ReglaFarmaenlaceDemanda.Arn
+                  - !GetAtt ReglaFarmaenlacePedidos.Arn
+
+  EvaluadorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub goble-${EnvName}-evaluador
+      Description: Revisa el saldo de medicación y publica alertas (Scheduler, PacienteActualizado, EvaluacionSolicitada)
+      Runtime: python3.12
+      Handler: handlers.evaluador.handler
+      Role: !GetAtt AppRole.Arn
+      Timeout: 120
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Ref FrontendKey
+      VpcConfig:
+        SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: tratamiento
+          DB_USER: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+          DB_PASSWORD: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+          EVENT_BUS_NAME: !Ref EventBus
+
+  NotificadorFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub goble-${EnvName}-notificador
+      Description: Envía por SES los avisos al cuidador y al paciente
+      Runtime: python3.12
+      Handler: handlers.notificador.handler
+      Role: !GetAtt AppRole.Arn
+      Timeout: 30
+      MemorySize: 256
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Ref FrontendKey
+      VpcConfig:
+        SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: tratamiento
+          DB_USER: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+          DB_PASSWORD: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+          EVENT_BUS_NAME: !Ref EventBus
+          EMAIL_REMITENTE: !Ref EmailRemitente
+          EMAIL_DESTINO_DEMO: !Ref EmailDestinoDemo
+          APP_URL: !GetAtt FrontendHttpApi.ApiEndpoint
+
+  EvaluadorLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/goble-${EnvName}-evaluador
+      RetentionInDays: 14
+
+  NotificadorLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/goble-${EnvName}-notificador
+      RetentionInDays: 14
+
+  ReglaEvaluador:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub goble-${EnvName}-evaluador
+      Description: Reevaluar al paciente que cambió, o a todos (Evaluar ahora)
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source: [goble.abastecimiento]
+        detail-type: [PacienteActualizado, EvaluacionSolicitada]
+      Targets:
+        - Id: evaluador
+          Arn: !GetAtt EvaluadorFunction.Arn
+          RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 3600 }
+          DeadLetterConfig: { Arn: !GetAtt EventosDlq.Arn }
+
+  ReglaNotificador:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub goble-${EnvName}-notificador
+      Description: Avisar por email al cuidador y al paciente
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source: [goble.abastecimiento]
+        detail-type: [MedicacionPorAgotarse, EntregaIessIncompleta, PedidoActualizado]
+      Targets:
+        - Id: notificador
+          Arn: !GetAtt NotificadorFunction.Arn
+          RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 3600 }
+          DeadLetterConfig: { Arn: !GetAtt EventosDlq.Arn }
+
+  EvaluadorInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref EvaluadorFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ReglaEvaluador.Arn
+
+  NotificadorInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref NotificadorFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ReglaNotificador.Arn
+
+  # Monitoreo programado: en la demo cada 2 minutos; en producción una vez al día
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Condition: SchedulerActivo
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invocar-evaluador
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt EvaluadorFunction.Arn
+
+  EvaluacionProgramada:
+    Type: AWS::Scheduler::Schedule
+    Condition: SchedulerActivo
+    Properties:
+      Name: !Sub goble-${EnvName}-evaluacion
+      Description: Revisa el saldo de medicación de todos los pacientes
+      ScheduleExpression: !Ref FrecuenciaEvaluacion
+      ScheduleExpressionTimezone: America/Guayaquil
+      FlexibleTimeWindow: { Mode: "OFF" }
+      Target:
+        Arn: !GetAtt EvaluadorFunction.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"origen": "programado"}'
+        RetryPolicy: { MaximumRetryAttempts: 0 } # la próxima ejecución ya llega en minutos
+
+  EmailRemitenteIdentity:
+    Type: AWS::SES::EmailIdentity
+    Condition: HayEmailRemitente
+    Properties:
+      EmailIdentity: !Ref EmailRemitente
+
+  # ===========================================================================
+  # Farmaenlace (MOCK para el MVP): sistema "externo" con su propia API.
+  #   PedidoSolicitado ─► API Destination ─► POST /pedidos ─┐ reserva stock, confirma o rechaza
+  #   DemandaPrevista  ─► API Destination ─► POST /demanda  │
+  #   callback firmado (HMAC) ◄─────────────────────────────┘ ─► app /api/v1/webhooks/farmaenlace
+  # Para usar la API real de Farmaenlace: apuntar las API Destinations a su URL y ajustar la Connection.
+  # ===========================================================================
+  FarmaenlaceApiKey:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub goble-${EnvName}/farmaenlace-api-key
+      Description: API key con la que EventBridge llama a la API de Farmaenlace (mock)
+      GenerateSecretString: { PasswordLength: 40, ExcludePunctuation: true }
+
+  FarmaenlaceWebhookSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub goble-${EnvName}/farmaenlace-webhook-secret
+      Description: Secreto HMAC con el que Farmaenlace firma los callbacks de estado de los pedidos
+      GenerateSecretString: { PasswordLength: 48, ExcludePunctuation: true }
+
+  FarmaenlaceMockFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub goble-${EnvName}-farmaenlace-mock
+      Description: Simula a Farmaenlace (demanda prevista, pedidos, reserva de stock, callbacks)
+      Runtime: python3.12
+      Handler: farmaenlace_mock.lambda_handler.handler
+      Role: !GetAtt AppRole.Arn
+      Timeout: 29
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Ref FrontendKey
+      VpcConfig:
+        SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: tratamiento
+          DB_USER: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+          DB_PASSWORD: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+          FARMAENLACE_API_KEY: !Sub "{{resolve:secretsmanager:${FarmaenlaceApiKey}}}"
+          FARMAENLACE_WEBHOOK_SECRET: !Sub "{{resolve:secretsmanager:${FarmaenlaceWebhookSecret}}}"
+          MODULO_WEBHOOK_URL: !Sub "${FrontendHttpApi.ApiEndpoint}/api/v1/webhooks/farmaenlace"
+
+  FarmaenlaceMockLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/goble-${EnvName}-farmaenlace-mock
+      RetentionInDays: 14
+
+  FarmaenlaceHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-mock
+      ProtocolType: HTTP
+      Target: !GetAtt FarmaenlaceMockFunction.Arn
+
+  FarmaenlaceInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref FarmaenlaceMockFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FarmaenlaceHttpApi}/*
+
+  FarmaenlaceConnection:
+    Type: AWS::Events::Connection
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace
+      AuthorizationType: API_KEY
+      AuthParameters:
+        ApiKeyAuthParameters:
+          ApiKeyName: x-api-key
+          ApiKeyValue: !Sub "{{resolve:secretsmanager:${FarmaenlaceApiKey}}}"
+
+  FarmaenlaceDemandaDestino:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-demanda
+      ConnectionArn: !GetAtt FarmaenlaceConnection.Arn
+      InvocationEndpoint: !Sub "${FarmaenlaceHttpApi.ApiEndpoint}/demanda"
+      HttpMethod: POST
+      InvocationRateLimitPerSecond: 10
+
+  FarmaenlacePedidosDestino:
+    Type: AWS::Events::ApiDestination
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-pedidos
+      ConnectionArn: !GetAtt FarmaenlaceConnection.Arn
+      InvocationEndpoint: !Sub "${FarmaenlaceHttpApi.ApiEndpoint}/pedidos"
+      HttpMethod: POST
+      InvocationRateLimitPerSecond: 10
+
+  ApiDestinationsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invocar-api-destinations
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: events:InvokeApiDestination
+                Resource:
+                  - !GetAtt FarmaenlaceDemandaDestino.Arn
+                  - !GetAtt FarmaenlacePedidosDestino.Arn
+
+  ReglaFarmaenlaceDemanda:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-demanda
+      Description: Demanda prevista (anónima) hacia Farmaenlace para que ubique stock
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source: [goble.abastecimiento]
+        detail-type: [DemandaPrevista]
+      Targets:
+        - Id: farmaenlace-demanda
+          Arn: !GetAtt FarmaenlaceDemandaDestino.Arn
+          RoleArn: !GetAtt ApiDestinationsRole.Arn
+          InputPath: $.detail
+          RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 3600 }
+          DeadLetterConfig: { Arn: !GetAtt EventosDlq.Arn }
+
+  ReglaFarmaenlacePedidos:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub goble-${EnvName}-farmaenlace-pedidos
+      Description: Pedidos (delivery o retiro, manuales o de la suscripción) hacia Farmaenlace
+      EventBusName: !Ref EventBus
+      EventPattern:
+        source: [goble.abastecimiento]
+        detail-type: [PedidoSolicitado]
+      Targets:
+        - Id: farmaenlace-pedidos
+          Arn: !GetAtt FarmaenlacePedidosDestino.Arn
+          RoleArn: !GetAtt ApiDestinationsRole.Arn
+          InputPath: $.detail
+          RetryPolicy: { MaximumRetryAttempts: 3, MaximumEventAgeInSeconds: 3600 }
+          DeadLetterConfig: { Arn: !GetAtt EventosDlq.Arn }
+
 Outputs:
   FrontendUrl:
     Description: URL pública (HTTPS) de la app Mi tratamiento
     Value: !GetAtt FrontendHttpApi.ApiEndpoint
+  FarmaenlaceUrl:
+    Description: API del mock de Farmaenlace (exige x-api-key; la clave está en Secrets Manager)
+    Value: !GetAtt FarmaenlaceHttpApi.ApiEndpoint
+  FarmaenlaceMockFunctionName:
+    Description: Lambda del mock; para la demo acepta {"accion":"pedidos"} y {"accion":"avanzar","ref":"..."}
+    Value: !Ref FarmaenlaceMockFunction
+  EventBusName:
+    Description: Bus de eventos del módulo de abastecimiento
+    Value: !Ref EventBus
+  EvaluadorFunctionName:
+    Description: Lambda que revisa el saldo de medicación
+    Value: !Ref EvaluadorFunction
+  EventosDlqUrl:
+    Description: Eventos que no se pudieron entregar (debería estar vacía)
+    Value: !Ref EventosDlq
   DbInitFunctionName:
     Description: Lambda que crea el esquema y carga la data fake
     Value: !Ref DbInitFunction

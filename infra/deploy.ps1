@@ -8,6 +8,8 @@
   powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -DbReset
   powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -ClaudeModel anthropic.claude-opus-4-8
   powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -DbInstanceClass db.t3.small
+  powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -EmailRemitente yo@correo.com -EmailDestinoDemo yo@correo.com
+  powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -FrecuenciaEvaluacion "cron(0 7 * * ? *)"
 
 .NOTES
   Requiere AWS CLI v2 y credenciales en el entorno ($Env:AWS_ACCESS_KEY_ID, etc.).
@@ -18,6 +20,10 @@ param(
     [string]$Region = $Env:AWS_REGION,
     [string]$ArtifactsBucket = "",
     [string]$ClaudeModel = "anthropic.claude-sonnet-5",
+    [string]$FrecuenciaEvaluacion = "rate(2 minutes)",  # producción: "cron(0 7 * * ? *)"
+    [switch]$SinScheduler,      # si la cuenta no permite EventBridge Scheduler
+    [string]$EmailRemitente = "",    # vacío = emails simulados (quedan en evento_log)
+    [string]$EmailDestinoDemo = "",  # todos los emails a esta casilla (SES en sandbox)
     [string]$DbInstanceClass = "db.t3.micro",  # si no hay capacidad en la región: db.t4g.micro, db.t3.small
     [switch]$DbReset  # borra la BD y vuelve a cargar la data fake
 )
@@ -74,7 +80,11 @@ $Params = @(
     "ArtifactsBucket=$ArtifactsBucket",
     "FrontendKey=$Prefix/$($Keys.FRONTEND_ZIP)",
     "ClaudeModel=$ClaudeModel",
-    "DbInstanceClass=$DbInstanceClass"
+    "DbInstanceClass=$DbInstanceClass",
+    "FrecuenciaEvaluacion=$FrecuenciaEvaluacion",
+    "HabilitarScheduler=$(if ($SinScheduler) { 'false' } else { 'true' })",
+    "EmailRemitente=$EmailRemitente",
+    "EmailDestinoDemo=$EmailDestinoDemo"
 )
 Invoke-Native aws (@("cloudformation", "deploy", "--region", $Region, "--stack-name", $Stack,
                      "--template-file", "infra/template.yaml", "--capabilities", "CAPABILITY_IAM",

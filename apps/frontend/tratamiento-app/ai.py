@@ -39,8 +39,10 @@ def _cliente():
         # Bedrock no tiene el parámetro `fallbacks` del servidor: si el modelo rechaza la petición,
         # el middleware del SDK reintenta con el modelo de respaldo.
         respaldo = os.getenv("CLAUDE_FALLBACK_MODEL", "anthropic.claude-opus-4-8")
+        # betas=(): sin el header "fallback-credit-2026-07-01", que Bedrock rechaza con un 400
         cliente = anthropic.AnthropicBedrockMantle(
-            aws_region=region, middleware=[anthropic.BetaRefusalFallbackMiddleware([{"model": respaldo}])])
+            aws_region=region,
+            middleware=[anthropic.BetaRefusalFallbackMiddleware([{"model": respaldo}], betas=())])
         return cliente, os.getenv("CLAUDE_MODEL", "anthropic.claude-sonnet-5")
     if os.getenv("ANTHROPIC_API_KEY"):
         return anthropic.Anthropic(), os.getenv("CLAUDE_MODEL", "claude-sonnet-5")

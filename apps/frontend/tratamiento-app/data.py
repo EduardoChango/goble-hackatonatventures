@@ -179,9 +179,16 @@ def cerrar():
 
 
 # ---------- guardado ----------
+# Cambios que alteran cuánta medicación tiene el paciente: el evaluador lo revisa al instante
+_REEVALUAR = {"guardar_receta", "registrar_entrega", "registrar_compra"}
+
+
 def _guardar(funcion, *args):
     if USAR_BD:
         getattr(db, funcion)(*args)
+        if funcion in _REEVALUAR:
+            from abastecimiento import eventos  # import diferido: eventos importa db
+            eventos.publicar("PacienteActualizado", {"paciente_id": db._pid(), "motivo": funcion})
     else:
         save()
 

@@ -408,8 +408,9 @@ def inicializar(forzar=False):
         if existe and not forzar:
             return {"estado": "ya inicializada"}
         with c.transaction():  # todo o nada: si un .sql falla, la BD queda como estaba
-            if existe:
-                c.execute("DROP SCHEMA public CASCADE; CREATE SCHEMA public;")
+            if existe:  # también el esquema del mock de Farmaenlace (009_pedidos.sql)
+                c.execute("DROP SCHEMA IF EXISTS farmaenlace CASCADE; DROP SCHEMA public CASCADE; "
+                          "CREATE SCHEMA public;")
             for archivo in archivos:
                 c.execute(archivo.read_text(encoding="utf-8"))
         pacientes = c.execute("SELECT count(*) AS n FROM paciente").fetchone()["n"]

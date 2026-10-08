@@ -101,15 +101,29 @@ powershell -ExecutionPolicy Bypass -File infra\deploy.ps1
 |---|---|
 | Empaquetar | Genera los zips en `build\artifacts\`. La primera vez descarga las dependencias para Linux (1-2 min) |
 | Subir | Crea el bucket `goble-artifacts-<cuenta>-<región>` y sube los zips |
-| CloudFormation | Crea el stack `goble-dev`: VPC, NAT, RDS (`db.t3.micro`), Lambdas y API. **Unos 15 minutos la primera vez** |
-| Base de datos | Invoca la Lambda `goble-dev-db-init`, que carga el catálogo de Farmaenlace (farmacias, medicinas y stock) y los 11 pacientes |
+| CloudFormation | Crea el stack `goble-dev`: VPC, NAT, RDS (`db.t3.micro`), Lambdas, API, bus de eventos y Scheduler. **Unos 15 minutos la primera vez** |
+| Base de datos | Invoca la Lambda `goble-dev-db-init`, que carga el catálogo de Farmaenlace (farmacias, medicinas y stock), los 15 pacientes y los 3 cuidadores |
+
+> **¿Ya tenías el stack desplegado de antes?** La base cambió (módulo de abastecimiento) y `db-init` no toca
+> una base que ya tiene datos. La primera vez con esta versión despliega con `-DbReset`, o el evaluador fallará.
 
 Opciones útiles:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -ClaudeModel anthropic.claude-opus-4-8    # otro modelo
 powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -DbReset                                  # recarga la data fake
+powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -ClaudeModel anthropic.claude-opus-4-8    # otro modelo
+powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -EmailRemitente tu@correo.com -EmailDestinoDemo tu@correo.com
+powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -FrecuenciaEvaluacion "cron(0 7 * * ? *)"  # producción: 1 vez al día
+powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -SinScheduler                             # si la cuenta no permite Scheduler
 ```
+
+**Correos reales (opcional).** Sin `-EmailRemitente`, los avisos se **simulan**: el correo completo queda en el
+registro de eventos y no se envía nada. Para recibirlos de verdad:
+
+1. Despliega con `-EmailRemitente tu@correo.com -EmailDestinoDemo tu@correo.com` (puede ser la misma casilla).
+2. AWS te envía un correo de verificación de SES: abre el enlace.
+3. Mientras la cuenta esté en el *sandbox* de SES, solo se entregan correos a casillas verificadas. Por eso
+   `-EmailDestinoDemo` redirige **todos** los avisos a tu casilla; el cuerpo indica a quién iban (cuidador y paciente).
 
 Para ver el progreso, abre **otra** ventana de PowerShell, pega las credenciales y ejecuta:
 
@@ -178,6 +192,73 @@ curl.exe -s -b "$Env:TEMP\ck.txt" -F "foto=@$HOME\Desktop\receta.jpg;type=image/
 - **Instalarla:** como la URL es HTTPS, Chrome permite instalarla como app (menú → *Instalar aplicación*) y activar notificaciones.
 - **Guion de la demo:** está en `apps\frontend\tratamiento-app\README.md`. El botón **Demo → Restablecer datos** devuelve al paciente de la sesión a su estado inicial.
 
+## Paso 5b: Probar el monitoreo continuo
+
+El **Scheduler** revisa a todos los pacientes cada 2 minutos. Con la fecha real ya hay alertas: Jorge Quishpe
+(levodopa por agotarse), Rosa Quishpe (memantina agotada) y Mercedes Yánez (IESS sin responder).
+
+```powershell
+# 1. Ver al Scheduler trabajar (Ctrl+C para salir)
+aws logs tail /aws/lambda/goble-dev-evaluador --since 10m --follow
+
+# 2. Ver los avisos que salieron (o se simularon)
+aws logs tail /aws/lambda/goble-dev-notificador --since 10m
+```
+
+**Simular días** para que aparezcan más alertas (el reloj lo comparten la app, el Scheduler y el evaluador).
+El payload va en un archivo porque Windows PowerShell pierde las comillas del JSON:
+
+```powershell
+Set-Content -Path "$Env:TEMP\reloj.json" -Value '{"origen": "manual", "avanzar_dias": 20}' -Encoding ascii
+aws lambda invoke --function-name goble-dev-evaluador --payload "fileb://$Env:TEMP\reloj.json" "$Env:TEMP\salida.json"
+Get-Content "$Env:TEMP\salida.json"     # con +20 días aparece Patricio Andrade (cuadriplejia)
+
+Set-Content -Path "$Env:TEMP\reloj.json" -Value '{"origen": "manual", "reloj": "hoy"}' -Encoding ascii
+aws lambda invoke --function-name goble-dev-evaluador --payload "fileb://$Env:TEMP\reloj.json" "$Env:TEMP\salida.json"
+```
+
+Si no quieres esperar al Scheduler, usa ese mismo comando con `'{"origen": "manual"}'` para **evaluar ahora**.
+
+**Los eventos que no se pudieron entregar** quedan en la DLQ, que debería estar vacía:
+
+```powershell
+$Dlq = aws cloudformation describe-stacks --stack-name goble-dev `
+  --query "Stacks[0].Outputs[?OutputKey=='EventosDlqUrl'].OutputValue" --output text
+aws sqs get-queue-attributes --queue-url $Dlq --attribute-names ApproximateNumberOfMessages
+```
+
+## Paso 5c: Pedidos a Farmaenlace y abastecimiento automático
+
+**Patricio Andrade** (cuadriplejia) tiene la **suscripción de abastecimiento automático** activa. Hoy su
+medicación alcanza para 25 días; al simular +20 días entra en el margen y el evaluador **genera solo los pedidos
+a domicilio**:
+
+```powershell
+Set-Content -Path "$Env:TEMP\reloj.json" -Value '{"origen": "manual", "avanzar_dias": 20}' -Encoding ascii
+aws lambda invoke --function-name goble-dev-evaluador --payload "fileb://$Env:TEMP\reloj.json" "$Env:TEMP\salida.json"
+Get-Content "$Env:TEMP\salida.json"      # "pedidos_automaticos": 2 pedidos de Patricio
+```
+
+Ninguna sucursal tiene el mes completo de sus 3 medicamentos, así que el pedido se **reparte**: Medicity Puembo
+(su preferida) y Económicas Pifo Chaupimolino (oxibutinina, parcial: 56 de 60).
+
+Ver los pedidos **como los ve Farmaenlace** y hacerlos avanzar (confirmado → en camino → entregado):
+
+```powershell
+Set-Content -Path "$Env:TEMP\fe.json" -Value '{"accion": "pedidos"}' -Encoding ascii
+aws lambda invoke --function-name goble-dev-farmaenlace-mock --payload "fileb://$Env:TEMP\fe.json" "$Env:TEMP\fe-salida.json"
+Get-Content "$Env:TEMP\fe-salida.json"   # anota el "ref" (FE-PED-000001)
+
+Set-Content -Path "$Env:TEMP\fe.json" -Value '{"accion": "avanzar", "ref": "FE-PED-000001"}' -Encoding ascii
+aws lambda invoke --function-name goble-dev-farmaenlace-mock --payload "fileb://$Env:TEMP\fe.json" "$Env:TEMP\fe-salida.json"
+```
+
+Cada cambio de estado llega al módulo por un callback **firmado** y genera un email al cuidador ("tu pedido
+automático fue confirmado", "está en camino", "fue entregado"). Al entregarse, el pedido cuenta como compra y el
+saldo de Patricio vuelve a verde.
+
+La demanda prevista (anónima) que recibió Farmaenlace: `{"accion": "demanda"}` con el mismo comando.
+
 ## Paso 6: Ver logs
 
 ```powershell
@@ -222,6 +303,12 @@ RDS se borra sin snapshot final y los secretos quedan programados para borrarse 
 | El stack falla o queda en `ROLLBACK_COMPLETE` | Mira la causa con el comando de abajo (*Ver la causa de un fallo*). Luego borra el stack (Paso 8) antes de reintentar |
 | `CREATE_FAILED` con `not authorized` o `explicit deny` | La cuenta del workshop prohíbe ese recurso (por ejemplo NAT, EIP o RDS). Anota el recurso y el mensaje para buscar una alternativa |
 | `Database`: *no Availability Zones with sufficient capacity* (`ServiceLimitExceeded`) | AWS no tiene capacidad para ese tamaño de RDS en la región. Borra el stack (Paso 8) y despliega con otro tamaño: `-DbInstanceClass db.t3.small` o `db.t4g.micro` |
+| El evaluador falla con `relation "v_saldo_medicacion" does not exist` | La base es de una versión anterior. Despliega con `-DbReset` |
+| `CREATE_FAILED` en `EvaluacionProgramada` o `SchedulerRole` | La cuenta no permite EventBridge Scheduler. Borra el stack y despliega con `-SinScheduler` |
+| `CREATE_FAILED` en `EmailRemitenteIdentity` | SES no está permitido o la identidad ya existe. Despliega sin `-EmailRemitente` (los avisos se simulan) |
+| No llegan los correos | Revisa que abriste el enlace de verificación de SES y que usas `-EmailDestinoDemo` con una casilla verificada. `aws logs tail /aws/lambda/goble-dev-notificador` muestra el motivo |
+| Los pedidos quedan en `solicitado` | El evento no llegó a Farmaenlace: revisa la DLQ y `aws logs tail /aws/lambda/goble-dev-farmaenlace-mock` |
+| Un pedido sale `rechazado` | Esa sucursal no tiene stock suficiente (el motivo viene en el pedido). El abastecimiento automático lo reintenta al día siguiente |
 | `db-init` responde con error o timeout | `aws logs tail /aws/lambda/goble-dev-db-init`. La Lambda debe estar en la VPC y llegar a RDS por el puerto 5432 |
 | La URL responde `Internal Server Error` | `aws logs tail /aws/lambda/goble-dev-tratamiento-app` |
 | `AccessDeniedException ... private marketplace eligibility` en Bedrock | El workshop no aprobó ese modelo. Usa otro Claude con `-ClaudeModel` (Paso 3) |

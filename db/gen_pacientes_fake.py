@@ -258,6 +258,111 @@ def main():
     OUT_USUARIOS.write_text(usuarios_sql(pacientes), encoding="utf-8")
     print(f"Generado {OUT_USUARIOS}")
 
+    generar_abastecimiento()
+
+
+# =============================================================================
+# 007: pacientes del módulo de abastecimiento (movilidad reducida + cuidadores).
+# Usa su propio generador aleatorio para no cambiar los pacientes 2-11 ni sus correos.
+# Cada paciente queda en un estado distinto del semáforo con la fecha real de hoy:
+#   12 Parkinson    -> por agotarse (6 días)      13 Alzheimer    -> memantina agotada
+#   14 Cuadriplejia -> ok (25 días)               15 Paliativos   -> IESS sin responder
+# =============================================================================
+OUT_ABASTECIMIENTO = INIT / "007_pacientes_cuidadores.sql"
+
+CUIDADORES_ABAST = [
+    # id, nombre, teléfono, lat, lng (desde dónde sale a comprar)
+    (1, "Ana Quishpe (ejemplo)",     "0991111111", -0.2120, -78.4000),   # Tumbaco: cuida a sus dos padres
+    (2, "Diego Andrade (ejemplo)",   "0992222222", -0.1790, -78.3590),   # Puembo
+    (3, "Sofía Paredes (ejemplo)",   "0993333333", -0.1625, -78.3205),   # Yaruquí: enfermera a domicilio
+]
+
+PACIENTES_ABAST = [
+    dict(pid=12, nombre="Jorge Quishpe", nacimiento="1949-03-14", condiciones=[7], parentesco="Hijo/a",
+         lat=-0.1700, lng=-78.3600, direccion="Calle Manuel Burbano y 24 de Mayo, Puembo",
+         cuidadores=[(1, "principal", "Hija")],
+         visita_hace=24, items=[
+             # uid, dosis, cada_horas, horarios, entrega IESS (estado, unidades)
+             ("FE-00082", 250, 8, ["06:00", "14:00", "22:00"], ("completo", 90)),
+             ("FE-00084", 1, 24, ["08:00"], ("completo", 30)),
+         ], compras=[(1, "recoger", {"FE-00084": 30})]),
+    dict(pid=13, nombre="Rosa Quishpe", nacimiento="1952-07-02", condiciones=[8, 1], parentesco="Hijo/a",
+         lat=-0.1700, lng=-78.3600, direccion="Calle Manuel Burbano y 24 de Mayo, Puembo",
+         cuidadores=[(1, "principal", "Hija")],
+         visita_hace=10, items=[
+             ("FE-00087", 10, 24, ["21:00"], ("completo", 30)),
+             ("FE-00088", 10, 12, ["08:00", "20:00"], ("parcial", 20)),
+         ], compras=[]),
+    dict(pid=14, nombre="Patricio Andrade", nacimiento="1978-11-20", condiciones=[6], parentesco="Hermano/a",
+         lat=-0.1990, lng=-78.3670, direccion="Av. Interoceánica km 18, Puembo",
+         cuidadores=[(2, "principal", "Hermano"), (3, "apoyo", "Enfermera")],
+         visita_hace=5, items=[
+             ("FE-00103", 300, 8, ["06:00", "14:00", "22:00"], ("completo", 90)),
+             ("FE-00177", 5, 12, ["08:00", "20:00"], ("completo", 60)),
+             ("FE-00136", 20, 24, ["07:00"], ("completo", 30)),
+         ], compras=[]),
+    dict(pid=15, nombre="Mercedes Yánez", nacimiento="1940-05-09", condiciones=[9], parentesco="Enfermera",
+         lat=-0.1640, lng=-78.3250, direccion="Calle Amazonas S1-80, Yaruquí",
+         cuidadores=[(3, "principal", "Enfermera")],
+         visita_hace=2, items=[
+             ("FE-00150", 50, 8, ["06:00", "14:00", "22:00"], None),   # IESS aún no responde
+             ("FE-00144", 500, 8, ["07:00", "15:00", "23:00"], None),
+         ], compras=[]),
+]
+
+
+def generar_abastecimiento():
+    r = random.Random(2027)
+    sql = ["-- GENERADO por db/gen_pacientes_fake.py (generar_abastecimiento). No editar a mano.",
+           "-- Pacientes con movilidad reducida (ids 12-15), sus cuidadores y logins. Contraseña: " + PASSWORD_DEMO,
+           "", "-- Cuidadores (no dependen de un paciente: el reset no los toca)",
+           "INSERT INTO cuidador (id, nombre, email, telefono, lat, lng) VALUES"]
+    sql.append(",\n".join(f"    ({cid}, {q(n)}, {q(email_de(n))}, {q(t)}, {la}, {lo})"
+                          for cid, n, t, la, lo in CUIDADORES_ABAST) + ";")
+    sql.append("")
+    visita_id, item_id, compra_id = 200, 2000, 200
+    for p in PACIENTES_ABAST:
+        pid, nombre = p["pid"], p["nombre"] + " (ejemplo)"
+        sql += [f"-- @paciente {pid}",
+                f"-- ---------- Paciente {pid}: {nombre} ----------",
+                "INSERT INTO paciente (id, nombre, fecha_nacimiento, cuidador, tiene_iess, consentimiento, "
+                "consentimiento_en, lat, lng, direccion_entrega, movilidad_reducida) VALUES "
+                f"({pid}, {q(nombre)}, '{p['nacimiento']}', {q(p['parentesco'])}, TRUE, TRUE, now(), "
+                f"{p['lat']}, {p['lng']}, {q(p['direccion'])}, TRUE);",
+                "INSERT INTO paciente_condicion (paciente_id, condicion_id) VALUES "
+                + ", ".join(f"({pid}, {c})" for c in p["condiciones"]) + ";",
+                "INSERT INTO paciente_cuidador (paciente_id, cuidador_id, rol, parentesco) VALUES "
+                + ", ".join(f"({pid}, {cid}, '{rol}', {q(par)})" for cid, rol, par in p["cuidadores"]) + ";",
+                "INSERT INTO cita (paciente_id, fecha_hora, motivo) VALUES "
+                f"({pid}, CURRENT_DATE + {r.randint(5, 25)} + TIME '09:00', 'Control médico');",
+                "INSERT INTO visita (id, paciente_id, fecha, origen) VALUES "
+                f"({visita_id}, {pid}, {dias_atras(p['visita_hace'])}, 'manual');"]
+        ids = {}
+        entregas = []
+        for uid, dosis, cada, horarios, entrega in p["items"]:
+            sql.append("INSERT INTO receta_item (id, visita_id, uid_medicina, dosis_mg, cada_horas, dias, horarios) "
+                       f"VALUES ({item_id}, {visita_id}, '{uid}', {dosis}, {cada}, 30, '{{{','.join(horarios)}}}');")
+            ids[uid] = item_id
+            if entrega:
+                entregas.append(f"({item_id}, '{entrega[0]}', {entrega[1]})")
+            item_id += 1
+        if entregas:
+            sql.append("INSERT INTO entrega_iess (receta_item_id, estado, unidades_recibidas) VALUES "
+                       + ", ".join(entregas) + ";")
+        for farmacia, modo, unidades in p["compras"]:
+            sql.append("INSERT INTO compra (id, paciente_id, visita_id, uid_farmacia, modo) VALUES "
+                       f"({compra_id}, {pid}, {visita_id}, {farmacia}, '{modo}');")
+            sql.append("INSERT INTO compra_item (compra_id, receta_item_id, unidades) VALUES "
+                       + ", ".join(f"({compra_id}, {ids[u]}, {n})" for u, n in unidades.items()) + ";")
+            compra_id += 1
+        salt = "".join(r.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") for _ in range(16))
+        sql.append("INSERT INTO usuario (id, paciente_id, email, password_hash) VALUES "
+                   f"({pid}, {pid}, {q(email_de(nombre))}, {q(password_hash(PASSWORD_DEMO, salt))});")
+        sql.append("")
+        visita_id += 1
+    OUT_ABASTECIMIENTO.write_text("\n".join(sql), encoding="utf-8")
+    print(f"Generado {OUT_ABASTECIMIENTO}")
+
 
 if __name__ == "__main__":
     main()
