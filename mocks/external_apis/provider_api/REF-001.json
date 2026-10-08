@@ -1,9 +1,0 @@
-{
-  "status_code": 200,
-  "body": {
-    "reference": "REF-001",
-    "score": 0.92,
-    "status": "APPROVED",
-    "source": "mock"
-  }
-}

@@ -1,105 +1,57 @@
-# Goble: hackathon workspace
+# Mi tratamiento · hackatón
 
-Monorepo con **arquitectura hexagonal (ports & adapters)**. Toda la lógica de negocio vive en un
-único hexágono, `packages/goble`. Las lambdas, el frontend y la IaC son piezas externas que se
-conectan a él.
+App web (PWA) para que a nadie se le acabe la medicina a mitad del tratamiento: lee la receta con IA,
+registra lo que entregó el IESS, avisa las tomas y encuentra la farmacia de Farmaenlace más cercana
+con stock de lo que falta.
 
 ```
 .
-├── packages/goble/src/goble/        # HEXÁGONO (compartido por lambdas y frontend)
-│   ├── domain/                      #   Entidades y reglas puras (sin AWS, sin frameworks)
-│   ├── application/
-│   │   ├── ports/inbound.py         #   Qué ofrece el sistema (casos de uso)
-│   │   ├── ports/outbound.py        #   Qué necesita del exterior (repos, APIs externas)
-│   │   └── use_cases/               #   Orquestación del dominio a través de los puertos
-│   ├── adapters/
-│   │   ├── inbound/                 #   Helpers para adapters de entrada (API Gateway)
-│   │   └── outbound/                #   Implementaciones de los puertos de salida
-│   │       ├── persistence/         #     DynamoDB | InMemory
-│   │       └── external_api/        #     HTTP real | Mock (lee /mocks)
-│   └── bootstrap/                   #   Settings + container (composition root)
+├── apps/frontend/tratamiento-app/   # La app: Flask + HTML/JS (PWA), login, IA con Claude
+│   ├── app.py                       #   Rutas
+│   ├── logic.py                     #   Reglas: faltantes, dosis, avisos, farmacias cercanas
+│   ├── data.py / db.py              #   Datos: data/state.json (sin BD) o PostgreSQL
+│   ├── ai.py                        #   Lectura de recetas con Claude (Bedrock o API de Anthropic)
+│   ├── lambda_handler.py, dbinit.py #   Entradas de AWS Lambda
+│   └── tests/                       #   Pruebas de punta a punta
 │
-├── apps/                            # ADAPTERS DE ENTRADA (driving)
-│   ├── lambdas/
-│   │   ├── process_job/handler.py   #   POST /jobs
-│   │   └── get_job/handler.py       #   GET  /jobs/{job_id}
-│   └── frontend/
-│       ├── tratamiento-app/         #   App de la demo: Flask + PWA, login, PostgreSQL, IA (Bedrock)
-│       ├── bff/                     #   Flask (backend-for-frontend) del scaffold inicial
-│       └── ui/                      #   Streamlit (solo habla con el BFF)
+├── db/                              # PostgreSQL 17 (ver db/README.md)
+│   ├── init/                        #   Esquema, pacientes y usuarios de prueba
+│   ├── datos_farmaenlace/           #   Catálogo real: farmacias, medicinas y stock
+│   └── docker-compose.yml           #   Base local
 │
-├── infra/                           # IaC: CloudFormation
-│   ├── template.yaml                #   VPC + RDS + Lambda Flask + API HTTP, y DynamoDB + Lambdas de jobs
-│   └── deploy.sh                    #   empaqueta, sube a S3 y despliega
+├── infra/                           # AWS con CloudFormation (ver infra/README.md)
+│   ├── template.yaml                #   VPC + RDS + Lambda Flask + API HTTP + Bedrock
+│   ├── deploy.ps1 / deploy.sh       #   Empaquetan, suben a S3, despliegan y cargan la BD
+│   └── GUIA_DESPLIEGUE.md           #   Paso a paso para desplegar y probar
 │
-├── db/                              # PostgreSQL: esquema, vistas y data fake (ver db/README.md)
-│   ├── docker-compose.yml
-│   └── init/                        #   001_schema … 004_pacientes_fake (corren al crear el volumen)
-│
-├── mocks/                           # DATA MOCKEADA
-│   ├── entrypoint/                  #   payloads de entrada + eventos de API Gateway
-│   └── external_apis/<api>/         #   respuestas simuladas de las APIs externas
-│
-├── scripts/                         # package.py (zips para S3), invoke_local.py
-└── tests/                           # pytest (usa adapters in-memory + mocks)
+└── scripts/package.py               # Arma el zip de la Lambda (dependencias para Linux)
 ```
 
-## Regla de dependencias
+## Empezar
 
-```
-apps/* (entrada) ──► application (ports + use_cases) ──► domain
-                                 ▲
-adapters/outbound ───────────────┘   (implementan los ports de salida)
-```
-
-- `domain` no importa nada del proyecto.
-- `application` solo importa `domain` y sus propios `ports`.
-- Solo `bootstrap/container.py` decide qué adapter implementa cada puerto, según las variables de entorno.
-
-## Setup local
-
-```bash
-python -m venv .venv
-source .venv/Scripts/activate      # Windows (Git Bash). En PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements-dev.txt
-cp .env.example .env
-```
-
-## Comandos
-
-| Qué | Comando |
+| Quiero... | Ver |
 |---|---|
-| Tests | `pytest` |
-| Invocar una lambda con un evento mock | `python scripts/invoke_local.py process_job mocks/entrypoint/events/process_job.json` |
-| Flask BFF (puerto 5000) | `cd apps/frontend && flask --app bff.app run --port 5000` |
-| Streamlit UI | `cd apps/frontend && streamlit run ui/app.py` |
-| Empaquetar layer y lambdas | `python scripts/package.py` |
-| Deploy a AWS | `ENV_NAME=dev USE_MOCKS=true bash infra/deploy.sh` (ver [infra/README.md](infra/README.md)) |
+| Correr la app en mi computador | [apps/frontend/tratamiento-app/README.md](apps/frontend/tratamiento-app/README.md) |
+| Desplegar en AWS y probar | [infra/GUIA_DESPLIEGUE.md](infra/GUIA_DESPLIEGUE.md) |
+| Entender la base de datos y los usuarios de prueba | [db/README.md](db/README.md) |
 
-Con `BACKEND_MODE=local` (valor por defecto), el BFF ejecuta los casos de uso en proceso, así que
-el frontend funciona completo sin AWS. Con `BACKEND_MODE=http` y `API_BASE_URL` apunta al API Gateway desplegado.
+## Desarrollo
 
-## Mocks vs real
+```powershell
+py -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -r requirements-dev.txt
 
-| Variable | `true` / vacío | real |
-|---|---|---|
-| `USE_MOCKS` | `MockExternalDataProvider` (lee `mocks/external_apis`) | `HttpExternalDataProvider` |
-| `JOBS_TABLE_NAME` | vacío: `InMemoryJobRepository` | `DynamoDBJobRepository` |
+pytest                                   # pruebas de la app en modo JSON
+docker compose -f db/docker-compose.yml up -d
+$Env:DATABASE_URL = "postgresql://goble:goble@localhost:5432/tratamiento"
+pytest                                   # además: login, aislamiento entre usuarios y escrituras en la BD
+cfn-lint infra/template.yaml             # valida la infraestructura
+```
 
-Ver [mocks/README.md](mocks/README.md) para agregar escenarios o nuevas APIs.
+Las variables que usa la app en local están en [.env.example](.env.example).
 
-## Agregar una lambda nueva
+## Hosting
 
-1. Caso de uso en `application/use_cases/` y, si hace falta, un puerto nuevo en `ports/`.
-2. Fábrica en `bootstrap/container.py`.
-3. `apps/lambdas/<nombre>/handler.py`: solo traduce el evento al caso de uso y la respuesta a HTTP.
-4. Evento de ejemplo en `mocks/entrypoint/events/`.
-5. En `infra/template.yaml`: agregar su rol, función, log group, método, permiso y parámetro `<Nombre>Key`. Luego agrégala a `LAMBDAS` en `scripts/package.py` y a `infra/deploy.sh`.
-
-## Hosting del frontend
-
-Amplify Hosting **no ejecuta servidores Python**, así que la app Flask `apps/frontend/tratamiento-app`
-corre en **AWS Lambda detrás de API Gateway HTTP** (que da el HTTPS), con RDS PostgreSQL y Claude en Bedrock.
-Ver [infra/README.md](infra/README.md).
-
-> `Job` es una entidad placeholder: renómbrala al concepto real del negocio.
+Amplify Hosting **no ejecuta servidores Python**, así que la app Flask corre en **AWS Lambda detrás de
+API Gateway HTTP** (que da el HTTPS que necesita la PWA), con RDS PostgreSQL y Claude en Bedrock.

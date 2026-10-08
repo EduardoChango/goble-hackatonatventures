@@ -3,14 +3,12 @@
 # carga la base de datos (Lambda db-init) la primera vez.
 #
 # Uso (desde cualquier carpeta, con credenciales AWS en el entorno):
-#   ENV_NAME=dev USE_MOCKS=true bash infra/deploy.sh
+#   ENV_NAME=dev bash infra/deploy.sh
 #
 # El primer despliegue tarda ~15 min (RDS + NAT). Los siguientes, 1-3 min.
 #
 # Variables opcionales:
 #   ENV_NAME          dev | prod                       (default: dev)
-#   USE_MOCKS         true | false                     (default: true)
-#   PROVIDER_API_URL  URL de la API externa real       (default: vacío)
 #   AWS_REGION        región                           (default: la del perfil o us-east-1)
 #   ARTIFACTS_BUCKET  bucket para los zips             (default: goble-artifacts-<account>-<region>)
 #   CLAUDE_MODEL      modelo de Bedrock                (default: anthropic.claude-sonnet-5)
@@ -21,8 +19,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 ENV_NAME="${ENV_NAME:-dev}"
-USE_MOCKS="${USE_MOCKS:-true}"
-PROVIDER_API_URL="${PROVIDER_API_URL:-}"
 REGION="${AWS_REGION:-$(aws configure get region 2>/dev/null || true)}"
 REGION="${REGION:-us-east-1}"
 ACCOUNT="$(aws sts get-caller-identity --query Account --output text)"
@@ -50,7 +46,7 @@ if ! aws s3api head-bucket --bucket "$BUCKET" --region "$REGION" 2>/dev/null; th
 fi
 
 echo ">> Subiendo artefactos a s3://${BUCKET}/${PREFIX}/"
-for zip in "$LAYER_ZIP" "$PROCESS_JOB_ZIP" "$GET_JOB_ZIP" "$FRONTEND_ZIP"; do
+for zip in "$FRONTEND_ZIP"; do
   aws s3 cp "build/artifacts/${zip}" "s3://${BUCKET}/${PREFIX}/${zip}" --region "$REGION" --only-show-errors
 done
 
@@ -63,12 +59,7 @@ aws cloudformation deploy \
   --no-fail-on-empty-changeset \
   --parameter-overrides \
     EnvName="$ENV_NAME" \
-    UseMocks="$USE_MOCKS" \
-    ProviderApiUrl="$PROVIDER_API_URL" \
     ArtifactsBucket="$BUCKET" \
-    LayerKey="${PREFIX}/${LAYER_ZIP}" \
-    ProcessJobKey="${PREFIX}/${PROCESS_JOB_ZIP}" \
-    GetJobKey="${PREFIX}/${GET_JOB_ZIP}" \
     FrontendKey="${PREFIX}/${FRONTEND_ZIP}" \
     ClaudeModel="$CLAUDE_MODEL" \
     DbInstanceClass="$DB_INSTANCE_CLASS"

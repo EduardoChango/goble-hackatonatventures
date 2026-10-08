@@ -4,7 +4,7 @@
 
 | Archivo | Qué es |
 |---|---|
-| `template.yaml` | Un solo stack: la app **Mi tratamiento** (VPC, RDS, Lambdas, API HTTP) y el backend `goble` (DynamoDB, Layer, Lambdas, API REST) |
+| `template.yaml` | El stack de la app **Mi tratamiento**: VPC, RDS, Lambdas, API HTTP y permisos de Bedrock |
 | `deploy.ps1` / `deploy.sh` | Empaqueta, sube los zips a S3, despliega el stack y carga la base de datos (PowerShell / bash) |
 | `../scripts/package.py` | Genera los zips en `build/artifacts/`. Las dependencias de la app se descargan para Linux |
 
@@ -52,9 +52,9 @@ Puedes volver a ejecutar el mismo comando para actualizar el stack. `db-init` no
 ## Opción B: subir el YAML desde la consola
 
 1. Ejecuta `py scripts/package.py` para generar los zips en `build/artifacts/`.
-2. En S3, crea un bucket y sube los 4 zips.
+2. En S3, crea un bucket y sube el zip `frontend-<hash>.zip`.
 3. En CloudFormation, ve a **Create stack → Upload a template file** y elige `infra/template.yaml`.
-4. Completa los parámetros: `ArtifactsBucket`, y en `LayerKey`, `ProcessJobKey`, `GetJobKey` y `FrontendKey` el nombre exacto de cada zip (más la carpeta, si los subiste dentro de una).
+4. Completa los parámetros: `ArtifactsBucket`, y en `FrontendKey` el nombre exacto del zip (más la carpeta, si lo subiste dentro de una).
 5. Marca *"I acknowledge that AWS CloudFormation might create IAM resources"* y crea el stack.
 6. Cuando termine, en Lambda abre `goble-dev-db-init` y ejecuta un **Test** con el evento `{}` para cargar la base.
 
@@ -67,17 +67,7 @@ aws cloudformation delete-stack --stack-name goble-dev
 - **Se borra:** RDS se elimina sin snapshot final y los secretos quedan programados para borrarse en 7 días.
 - **Se queda:** el bucket de artefactos no forma parte del stack; hay que vaciarlo y borrarlo a mano.
 
-## Backend `goble` (jobs)
-
-```
-API Gateway  POST /jobs          ──► goble-<env>-process-job ──┐
-             GET  /jobs/{job_id} ──► goble-<env>-get-job     ──┼──► DynamoDB goble-<env>-jobs
-                                     (Layer: goble + mocks)    │
-                                                               └──► API externa (o mocks si UseMocks=true)
-```
-
 ## Notas
 
 - **Contraseña de la base:** las Lambdas reciben la contraseña de RDS como variable de entorno (resuelta desde Secrets Manager al desplegar), así que es visible en la consola de Lambda. Para producción, léela de Secrets Manager en tiempo de ejecución.
 - **Tamaño de las fotos:** API Gateway con Lambda acepta peticiones de hasta 6 MB. Una foto de receta muy pesada falla y la app cae a la receta de ejemplo; conviene reducirla en el navegador antes de subirla.
-- **Cambios en la API REST de jobs:** si agregas o modificas métodos, renombra `ApiDeployment` (por ejemplo, `ApiDeploymentV2`) para que API Gateway publique los cambios.

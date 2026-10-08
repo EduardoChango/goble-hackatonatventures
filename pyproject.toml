@@ -1,6 +1,7 @@
 [tool.pytest.ini_options]
-pythonpath = ["packages/goble/src"]
-testpaths = ["tests"]
+# Desde la raíz: `pytest` corre las pruebas de la app (con DATABASE_URL, también contra PostgreSQL)
+pythonpath = ["apps/frontend/tratamiento-app"]
+testpaths = ["apps/frontend/tratamiento-app/tests"]
 
 [tool.ruff]
 line-length = 100

@@ -1,5 +1,4 @@
--e packages/goble
--r apps/frontend/requirements.txt
+-r apps/frontend/tratamiento-app/requirements.txt
 pytest>=8.0
 ruff>=0.6
-boto3>=1.34
+cfn-lint>=1.0

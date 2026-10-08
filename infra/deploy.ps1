@@ -15,8 +15,6 @@
 #>
 param(
     [string]$EnvName = "dev",
-    [string]$UseMocks = "true",
-    [string]$ProviderApiUrl = "",
     [string]$Region = $Env:AWS_REGION,
     [string]$ArtifactsBucket = "",
     [string]$ClaudeModel = "anthropic.claude-sonnet-5",
@@ -65,7 +63,7 @@ if (-not $BucketExiste) {
 }
 
 Write-Host ">> Subiendo artefactos a s3://$ArtifactsBucket/$Prefix/" -ForegroundColor Cyan
-foreach ($zip in @($Keys.LAYER_ZIP, $Keys.PROCESS_JOB_ZIP, $Keys.GET_JOB_ZIP, $Keys.FRONTEND_ZIP)) {
+foreach ($zip in @($Keys.FRONTEND_ZIP)) {
     Invoke-Native aws @("s3", "cp", "build/artifacts/$zip", "s3://$ArtifactsBucket/$Prefix/$zip",
                         "--region", $Region, "--only-show-errors")
 }
@@ -73,16 +71,11 @@ foreach ($zip in @($Keys.LAYER_ZIP, $Keys.PROCESS_JOB_ZIP, $Keys.GET_JOB_ZIP, $K
 Write-Host ">> Desplegando CloudFormation (la primera vez tarda ~15 min)" -ForegroundColor Cyan
 $Params = @(
     "EnvName=$EnvName",
-    "UseMocks=$UseMocks",
     "ArtifactsBucket=$ArtifactsBucket",
-    "LayerKey=$Prefix/$($Keys.LAYER_ZIP)",
-    "ProcessJobKey=$Prefix/$($Keys.PROCESS_JOB_ZIP)",
-    "GetJobKey=$Prefix/$($Keys.GET_JOB_ZIP)",
     "FrontendKey=$Prefix/$($Keys.FRONTEND_ZIP)",
     "ClaudeModel=$ClaudeModel",
     "DbInstanceClass=$DbInstanceClass"
 )
-if ($ProviderApiUrl) { $Params += "ProviderApiUrl=$ProviderApiUrl" }
 Invoke-Native aws (@("cloudformation", "deploy", "--region", $Region, "--stack-name", $Stack,
                      "--template-file", "infra/template.yaml", "--capabilities", "CAPABILITY_IAM",
                      "--no-fail-on-empty-changeset", "--parameter-overrides") + $Params)

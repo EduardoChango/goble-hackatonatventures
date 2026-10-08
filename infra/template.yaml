@@ -1,34 +1,16 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  Goble - backend (DynamoDB + Lambdas + API Gateway REST) y app "Mi tratamiento"
-  (Flask en Lambda + API Gateway HTTP + RDS PostgreSQL en VPC privada + Claude en Bedrock)
+  App "Mi tratamiento": Flask en Lambda + API Gateway HTTP + RDS PostgreSQL en VPC privada
+  + Claude en Bedrock
 
 Parameters:
   EnvName:
     Type: String
     Default: dev
     AllowedValues: [dev, prod]
-  UseMocks:
-    Type: String
-    Default: "true"
-    AllowedValues: ["true", "false"]
-    Description: true = las lambdas responden con mocks/external_apis en lugar de llamar la API real
-  ProviderApiUrl:
-    Type: String
-    Default: ""
-    Description: URL base de la API externa real (solo se usa con UseMocks=false)
   ArtifactsBucket:
     Type: String
     Description: Bucket S3 donde están los zips generados por scripts/package.py
-  LayerKey:
-    Type: String
-    Description: S3 key del zip del layer (core goble + mocks)
-  ProcessJobKey:
-    Type: String
-    Description: S3 key del zip de la lambda process_job
-  GetJobKey:
-    Type: String
-    Description: S3 key del zip de la lambda get_job
   FrontendKey:
     Type: String
     Description: S3 key del zip de tratamiento-app (Flask + dependencias + db/init)
@@ -51,200 +33,6 @@ Conditions:
   BedrockRegionDefault: !Equals [!Ref BedrockRegion, ""]
 
 Resources:
-  # ---------- Persistencia ----------
-  JobsTable:
-    Type: AWS::DynamoDB::Table
-    DeletionPolicy: Delete # hackathon: cambiar a Retain en prod
-    UpdateReplacePolicy: Delete
-    Properties:
-      TableName: !Sub goble-${EnvName}-jobs
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: id
-          KeyType: HASH
-
-  # ---------- Core hexagonal compartido ----------
-  CoreLayer:
-    Type: AWS::Lambda::LayerVersion
-    Properties:
-      LayerName: !Sub goble-${EnvName}-core
-      Description: goble (domain + application + adapters) y mocks/external_apis
-      CompatibleRuntimes: [python3.12]
-      Content:
-        S3Bucket: !Ref ArtifactsBucket
-        S3Key: !Ref LayerKey
-
-  # ---------- IAM ----------
-  ProcessJobRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: jobs-table-write
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: [dynamodb:PutItem, dynamodb:GetItem]
-                Resource: !GetAtt JobsTable.Arn
-
-  GetJobRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: "2012-10-17"
-        Statement:
-          - Effect: Allow
-            Principal: { Service: lambda.amazonaws.com }
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      Policies:
-        - PolicyName: jobs-table-read
-          PolicyDocument:
-            Version: "2012-10-17"
-            Statement:
-              - Effect: Allow
-                Action: dynamodb:GetItem
-                Resource: !GetAtt JobsTable.Arn
-
-  # ---------- Lambdas (adapters de entrada) ----------
-  ProcessJobFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub goble-${EnvName}-process-job
-      Runtime: python3.12
-      Handler: handler.handler
-      Role: !GetAtt ProcessJobRole.Arn
-      Timeout: 30
-      MemorySize: 256
-      Layers: [!Ref CoreLayer]
-      Code:
-        S3Bucket: !Ref ArtifactsBucket
-        S3Key: !Ref ProcessJobKey
-      Environment:
-        Variables:
-          APP_ENV: !Ref EnvName
-          USE_MOCKS: !Ref UseMocks
-          MOCKS_DIR: /opt/mocks/external_apis
-          JOBS_TABLE_NAME: !Ref JobsTable
-          PROVIDER_API_URL: !Ref ProviderApiUrl
-
-  GetJobFunction:
-    Type: AWS::Lambda::Function
-    Properties:
-      FunctionName: !Sub goble-${EnvName}-get-job
-      Runtime: python3.12
-      Handler: handler.handler
-      Role: !GetAtt GetJobRole.Arn
-      Timeout: 10
-      MemorySize: 128
-      Layers: [!Ref CoreLayer]
-      Code:
-        S3Bucket: !Ref ArtifactsBucket
-        S3Key: !Ref GetJobKey
-      Environment:
-        Variables:
-          APP_ENV: !Ref EnvName
-          USE_MOCKS: !Ref UseMocks
-          MOCKS_DIR: /opt/mocks/external_apis
-          JOBS_TABLE_NAME: !Ref JobsTable
-
-  ProcessJobLogGroup:
-    Type: AWS::Logs::LogGroup
-    DeletionPolicy: Delete
-    Properties:
-      LogGroupName: !Sub /aws/lambda/${ProcessJobFunction}
-      RetentionInDays: 14
-
-  GetJobLogGroup:
-    Type: AWS::Logs::LogGroup
-    DeletionPolicy: Delete
-    Properties:
-      LogGroupName: !Sub /aws/lambda/${GetJobFunction}
-      RetentionInDays: 14
-
-  # ---------- API Gateway ----------
-  Api:
-    Type: AWS::ApiGateway::RestApi
-    Properties:
-      Name: !Sub goble-${EnvName}
-      EndpointConfiguration:
-        Types: [REGIONAL]
-
-  JobsResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref Api
-      ParentId: !GetAtt Api.RootResourceId
-      PathPart: jobs
-
-  JobIdResource:
-    Type: AWS::ApiGateway::Resource
-    Properties:
-      RestApiId: !Ref Api
-      ParentId: !Ref JobsResource
-      PathPart: "{job_id}"
-
-  PostJobsMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref Api
-      ResourceId: !Ref JobsResource
-      HttpMethod: POST
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ProcessJobFunction.Arn}/invocations
-
-  GetJobMethod:
-    Type: AWS::ApiGateway::Method
-    Properties:
-      RestApiId: !Ref Api
-      ResourceId: !Ref JobIdResource
-      HttpMethod: GET
-      AuthorizationType: NONE
-      Integration:
-        Type: AWS_PROXY
-        IntegrationHttpMethod: POST
-        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetJobFunction.Arn}/invocations
-
-  ProcessJobInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref ProcessJobFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/POST/jobs
-
-  GetJobInvokePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      Action: lambda:InvokeFunction
-      FunctionName: !Ref GetJobFunction
-      Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Api}/*/GET/jobs/*
-
-  # Nota: si agregas/cambias métodos, cambia el nombre lógico de este recurso
-  # (p.ej. ApiDeploymentV2) para forzar un nuevo deployment de API Gateway.
-  ApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn: [PostJobsMethod, GetJobMethod]
-    Properties:
-      RestApiId: !Ref Api
-      StageName: !Ref EnvName
-
   # ===========================================================================
   # App "Mi tratamiento" (apps/frontend/tratamiento-app)
   #
@@ -535,8 +323,3 @@ Outputs:
   DbSecretArn:
     Description: Usuario y contraseña de RDS (Secrets Manager)
     Value: !Ref DbSecret
-  ApiUrl:
-    Description: Usar como API_BASE_URL del frontend (BACKEND_MODE=http)
-    Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${EnvName}
-  JobsTableName:
-    Value: !Ref JobsTable
