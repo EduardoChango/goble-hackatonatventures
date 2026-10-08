@@ -1,11 +1,9 @@
-"""Empaqueta el layer y las lambdas como zips listos para subir a S3.
+"""Empaqueta tratamiento-app como zip listo para subir a S3 (lo usan las Lambdas de la app y db-init).
 
 Salida en build/artifacts/:
-    layer-<hash>.zip         -> python/goble/... + mocks/external_apis/... (montado en /opt)
-    process_job-<hash>.zip   -> handler.py
-    get_job-<hash>.zip       -> handler.py
-    frontend-<hash>.zip      -> tratamiento-app + dependencias (Linux) + db/init como db_init/ + db/datos_farmaenlace como db_datos/
-    keys.env                 -> nombres de los zips (lo lee infra/deploy.sh)
+    frontend-<hash>.zip   -> tratamiento-app + dependencias (Linux) + db/init como db_init/
+                             + db/datos_farmaenlace como db_datos/
+    keys.env              -> nombre del zip (lo leen infra/deploy.ps1 y infra/deploy.sh)
 
 El hash depende del contenido: si el código no cambia, el nombre tampoco, y CloudFormation
 no actualiza la lambda. Si cambia, el nombre nuevo fuerza la actualización.
@@ -20,7 +18,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "build" / "artifacts"
-LAMBDAS = ["process_job", "get_job"]
 APP = ROOT / "apps" / "frontend" / "tratamiento-app"
 # Carpetas de la app que no van a la Lambda
 APP_EXCLUIR = {"tests", "data", ".venv", "__pycache__"}
@@ -73,22 +70,12 @@ def main() -> None:
     for viejo in OUT.iterdir():
         viejo.unlink()
 
-    keys = {
-        "LAYER_ZIP": build_zip(
-            "layer",
-            [
-                (ROOT / "packages" / "goble" / "src" / "goble", "python/goble/"),
-                (ROOT / "mocks" / "external_apis", "mocks/external_apis/"),
-            ],
-        )
-    }
-    for name in LAMBDAS:
-        keys[f"{name.upper()}_ZIP"] = build_zip(name, [(ROOT / "apps" / "lambdas" / name, "")])
-
-    keys["FRONTEND_ZIP"] = build_zip(
-        "frontend",
-        [(frontend_deps(), ""), (APP, "", APP_EXCLUIR), (ROOT / "db" / "init", "db_init/"), (ROOT / "db" / "datos_farmaenlace", "db_datos/")],
-    )
+    keys = {"FRONTEND_ZIP": build_zip("frontend", [
+        (frontend_deps(), ""),
+        (APP, "", APP_EXCLUIR),
+        (ROOT / "db" / "init", "db_init/"),
+        (ROOT / "db" / "datos_farmaenlace", "db_datos/"),
+    ])}
 
     (OUT / "keys.env").write_text("".join(f"{k}={v}\n" for k, v in keys.items()), encoding="utf-8")
     for v in keys.values():
