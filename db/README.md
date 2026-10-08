@@ -37,6 +37,7 @@ docker compose -f db/docker-compose.yml up -d
 | `init/005_usuarios.sql` | **Generado.** Un usuario de login por paciente (contraseña `demo1234`) |
 | `init/006_abastecimiento.sql` | Módulo de abastecimiento: reloj de la demo, cuidadores, productos relacionados, medicamentos controlados y la vista `v_saldo_medicacion` |
 | `init/007_pacientes_cuidadores.sql` | **Generado.** 4 pacientes con movilidad reducida (ids 12-15), 3 cuidadores y sus logins |
+| `init/008_eventos.sql` | Alertas idempotentes (`alerta`) y registro de eventos (`evento_log`) del evaluador |
 | `init/999_sync_sequences.sql` | Alinea las secuencias tras insertar IDs fijos |
 | `gen_pacientes_fake.py` | Regenera `004` y `005` (determinista): `py db/gen_pacientes_fake.py` |
 | `datos_farmaenlace/farmacias.sql` | 11 farmacias reales de Farmaenlace (Económicas y Medicity) cerca de Puembo, de Google Maps (2026-10-08) |
@@ -134,6 +135,28 @@ DELETE FROM config_demo WHERE clave = 'fecha_referencia';     -- volver a hoy
 | `producto`, `regla_sugerencia` | Productos no medicamentosos sugeridos por condición o por grupo de medicina |
 | `config_demo` | Reloj de la demo |
 | Columnas nuevas | `paciente.umbral_dias`, `direccion_entrega`, `movilidad_reducida`; `medicinas.controlado` (provisional, validar con ARCSA) |
+
+### Evaluador y eventos
+
+`apps/frontend/tratamiento-app/abastecimiento/evaluador.py` revisa `v_saldo_medicacion` y, por cada paciente con alertas **nuevas**, publica:
+
+| Evento | Cuándo | Contenido |
+|---|---|---|
+| `MedicacionPorAgotarse` | Un medicamento está por agotarse (≤ `umbral_dias`) o agotado | Cuidadores, farmacias sugeridas, productos relacionados, `solo_retiro` si es controlado |
+| `EntregaIessIncompleta` | El IESS entregó parcial o nada (y aún falta), o no respondió | Recibido, comprado, total y falta por medicamento |
+| `DemandaPrevista` | Hay algo que comprar | Para la mejor farmacia: medicina, cantidad y fecha. **Sin datos del paciente** |
+
+- **Sin duplicados:** la tabla `alerta` evita repetir un aviso en el mismo día de referencia. El aviso de entrega incompleta sale una sola vez por receta.
+- **Reevaluación inmediata:** guardar una receta, una entrega del IESS o una compra publica `PacienteActualizado`, que reevalúa a ese paciente al instante.
+- **Sin AWS:** si no hay `EVENT_BUS_NAME`, los eventos se despachan en proceso siguiendo la misma tabla de rutas que tendrán las reglas de EventBridge (`abastecimiento/eventos.py`). Todo queda en `evento_log`.
+
+Para probarlo en local (desde `apps/frontend/tratamiento-app`, con `DATABASE_URL`):
+
+```powershell
+python -m handlers.evaluador                # evalúa a todos con el reloj actual
+python -m handlers.evaluador --avanzar 20   # simula +20 días y evalúa
+python -m handlers.evaluador --hoy          # vuelve el reloj a la fecha real
+```
 
 ## Consultas útiles
 
