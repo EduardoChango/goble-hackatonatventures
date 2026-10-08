@@ -12,10 +12,13 @@ from datetime import date
 BASE = os.path.dirname(os.path.abspath(__file__))
 PATH = os.path.join(BASE, "data", "state.json")
 
-# Ubicación por defecto: centro de Ambato (aproximada). Todo lo demás es inventado.
-CENTRO = (-1.2491, -78.6167)
+# Ubicación por defecto: La Palma Polo Club (sede del hackatón, Puembo, Quito).
+CENTRO = (-0.1588, -78.3665)
 
-# STOCK SIMULADO. Las coordenadas son aproximadas y las cantidades son inventadas.
+# FARMACIAS REALES del grupo Farmaenlace (Farmacias Económicas y Medicity) cerca de Puembo.
+# Nombres, direcciones, horarios y coordenadas salen de Google Maps (pueden cambiar).
+# El STOCK es SIMULADO: las cantidades son inventadas. EDU: aquí se conectaría el stock real.
+
 # Promociones de ejemplo (simuladas). EDU: aqui se conectaria el servicio real de promociones de Farmaenlace.
 PROMOS = [
     {"titulo": "15% de descuento en Metformina", "detalle": "Tratamientos de 30 días o más. Con tarjeta de fidelidad.", "med": "Metformina", "vence": "Hoy"},
@@ -25,26 +28,39 @@ PROMOS = [
 ]
 
 FARMACIAS = [
-    {"id": 1, "nombre": "Económicas · Centro", "lat": -1.2519, "lng": -78.6167, "horario": "Abierta hasta las 21:00",
-     "stock": {"Losartán": 60, "Metformina": 40, "Atorvastatina": 30, "Amlodipino": 25}},
-    {"id": 2, "nombre": "Medicity · Centro Comercial", "lat": -1.2441, "lng": -78.6102, "horario": "Abierta hasta las 22:00",
-     "stock": {"Losartán": 30, "Metformina": 22, "Atorvastatina": 0, "Amlodipino": 18}},
-    {"id": 3, "nombre": "Económicas · Ficoa", "lat": -1.2334, "lng": -78.6230, "horario": "Abierta hasta las 20:00",
-     "stock": {"Losartán": 0, "Metformina": 55, "Atorvastatina": 30, "Amlodipino": 0}},
-    {"id": 4, "nombre": "Económicas · Terminal", "lat": -1.2572, "lng": -78.6089, "horario": "Abierta hasta las 21:00",
+    {"id": 1, "nombre": "Medicity · Puembo", "parroquia": "Puembo", "direccion": "Manuel Burbano",
+     "lat": -0.1774634, "lng": -78.3588022, "horario": "Abierta hasta las 20:30",
+     "stock": {"Losartán": 80, "Metformina": 100, "Atorvastatina": 60, "Amlodipino": 25}},
+    {"id": 2, "nombre": "Económicas · Puembo Centro", "parroquia": "Puembo", "direccion": "Simón Bolívar y 24 de Mayo",
+     "lat": -0.1786097, "lng": -78.358901, "horario": "Abierta hasta las 20:00",
+     "stock": {"Losartán": 30, "Metformina": 55, "Atorvastatina": 0, "Amlodipino": 18}},
+    {"id": 3, "nombre": "Económicas · Puembo", "parroquia": "Puembo", "direccion": "24 de Mayo y Humberto Duque",
+     "lat": -0.1984982, "lng": -78.3680239, "horario": "Abierta hasta las 20:00",
+     "stock": {"Losartán": 0, "Metformina": 22, "Atorvastatina": 30, "Amlodipino": 0}},
+    {"id": 4, "nombre": "Medicity · Puembo 24 de Mayo", "parroquia": "Puembo", "direccion": "24 de Mayo y Patricio Romero",
+     "lat": -0.1998237, "lng": -78.3676522, "horario": "Abierta hasta las 21:30",
      "stock": {"Losartán": 45, "Metformina": 8, "Atorvastatina": 20, "Amlodipino": 40}},
-    {"id": 5, "nombre": "Medicity · Huachi", "lat": -1.2685, "lng": -78.6270, "horario": "Abierta hasta las 21:30",
+    {"id": 5, "nombre": "Económicas · Yaruquí", "parroquia": "Yaruquí", "direccion": "Av. Amazonas",
+     "lat": -0.1624381, "lng": -78.3200072, "horario": "Abierta hasta las 21:00",
      "stock": {"Losartán": 20, "Metformina": 36, "Atorvastatina": 6, "Amlodipino": 12}},
-    {"id": 6, "nombre": "Económicas · Atocha", "lat": -1.2296, "lng": -78.6341, "horario": "Abierta hasta las 20:00",
+    {"id": 6, "nombre": "Medicity · Vía Pifo", "parroquia": "Puembo / Tumbaco", "direccion": "Av. Guayasamín y Ruta Viva",
+     "lat": -0.2105018, "lng": -78.3643521, "horario": "Abierta hasta las 21:00",
      "stock": {"Losartán": 12, "Metformina": 0, "Atorvastatina": 0, "Amlodipino": 9}},
-    {"id": 7, "nombre": "Económicas · Pishilata", "lat": -1.2630, "lng": -78.5990, "horario": "Abierta hasta las 21:00",
+    {"id": 7, "nombre": "Económicas · Tumbaco Villavega", "parroquia": "Tumbaco", "direccion": "Villa Vega y Av. Guayasamín",
+     "lat": -0.209798, "lng": -78.3868623, "horario": "Abierta hasta las 21:00",
      "stock": {"Losartán": 70, "Metformina": 64, "Atorvastatina": 48, "Amlodipino": 33}},
-    {"id": 8, "nombre": "Medicity · Ingahurco", "lat": -1.2380, "lng": -78.6130, "horario": "Abierta hasta las 22:00",
+    {"id": 8, "nombre": "Económicas · Pifo Chaupimolino", "parroquia": "Pifo", "direccion": "Chaupimolino",
+     "lat": -0.2196237, "lng": -78.3388996, "horario": "Abierta hasta las 21:00",
      "stock": {"Losartán": 18, "Metformina": 14, "Atorvastatina": 10, "Amlodipino": 7}},
-    {"id": 9, "nombre": "Económicas · Miraflores", "lat": -1.2450, "lng": -78.6240, "horario": "Abierta hasta las 20:30",
+    {"id": 9, "nombre": "Medicity · Tumbaco Central", "parroquia": "Tumbaco", "direccion": "Juan Montalvo y Fray Gonzalo de Vera",
+     "lat": -0.213573, "lng": -78.4056652, "horario": "Abierta hasta las 21:00",
      "stock": {"Losartán": 26, "Metformina": 31, "Atorvastatina": 0, "Amlodipino": 15}},
-    {"id": 10, "nombre": "Económicas · Izamba", "lat": -1.2040, "lng": -78.5780, "horario": "Abierta hasta las 20:00",
+    {"id": 10, "nombre": "Medicity · Tumbaco La Cerámica", "parroquia": "Tumbaco", "direccion": "La Cerámica",
+     "lat": -0.2211377, "lng": -78.3929391, "horario": "Abierta hasta las 21:00",
      "stock": {"Losartán": 50, "Metformina": 50, "Atorvastatina": 25, "Amlodipino": 20}},
+    {"id": 11, "nombre": "Económicas · Pifo Gonzalo Pizarro", "parroquia": "Pifo", "direccion": "Gonzalo Pizarro",
+     "lat": -0.2242182, "lng": -78.3407142, "horario": "Abierta hasta las 21:00",
+     "stock": {"Losartán": 35, "Metformina": 25, "Atorvastatina": 15, "Amlodipino": 10}},
 ]
 
 

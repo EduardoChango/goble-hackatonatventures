@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Resumen para mi médico{% endblock %}
+{% block header %}
+<p class="eyebrow">Para mi control médico</p>
+<h1>Resumen para mi médico</h1>
+<p class="sub">{{ perfil.nombre }} · {{ perfil.edad }} años</p>
+{% endblock %}
+{% block content %}
+{% if not r %}
+  <section class="card"><p>Todavía no hay recetas para resumir. Sube la foto de la primera.</p></section>
+  <a class="btn" href="/receta?nueva=1">Subir receta</a>
+{% else %}
+  <section class="card">
+    <h3>Paciente</h3>
+    <p>{{ perfil.nombre }}, {{ perfil.edad }} años</p>
+    <p class="muted">{{ perfil.condiciones|join(', ') or 'Sin condiciones registradas' }} · {{ 'Afiliado al IESS' if perfil.iess else 'Sin IESS' }}</p>
+    <p class="muted">Receta del {{ fecha_corta(r.visita.fecha) }}{% if r.previa %} · comparada con la del {{ fecha_corta(r.previa.fecha) }}{% endif %}</p>
+  </section>
+
+  {% if r.frases %}
+  <section class="card aviso">
+    <h3>Para decirle al médico</h3>
+    {% for x in r.frases %}<p>• {{ x }}</p>{% endfor %}
+  </section>
+  {% else %}
+  <section class="card ok"><h3>Sin cambios</h3><p>La receta es igual a la anterior y el IESS entregó todo.</p></section>
+  {% endif %}
+
+  <section class="card">
+    <h3>Medicamentos actuales</h3>
+    {% for m in r.filas %}
+    <div class="row">
+      <div>
+        <p {% if m.estado == 'suspendido' %}style="text-decoration:line-through"{% endif %}><b>{{ m.nombre }}</b> · {{ m.detalle }}</p>
+        <p class="muted" style="font-size:14px">cada {{ m.cada_horas }} h · {{ m.dias }} días</p>
+      </div>
+      <span class="badge b-{{ m.estado }}">{{ ETIQUETAS[m.estado] }}</span>
+    </div>
+    {% endfor %}
+  </section>
+
+  {% if r.entregas %}
+  <section class="card">
+    <h3>Qué entregó el IESS</h3>
+    {% for e in r.entregas %}
+    <div class="row">
+      <p>{{ e.nombre }}</p>
+      {% if e.estado == 'completo' %}<span class="badge b-completo">Completo</span>
+      {% elif e.estado == 'parcial' %}<span class="badge b-parcial">Parcial · {{ e.recibido }} de {{ e.total }}</span>
+      {% else %}<span class="badge b-no">No entregó</span>{% endif %}
+    </div>
+    {% endfor %}
+    {% if r.falta %}<p class="muted" style="font-size:14px">Pendiente de comprar: {{ r.falta|map(attribute='nombre')|join(', ') }}.</p>{% endif %}
+  </section>
+  {% endif %}
+
+  <p class="nota"><b>Resumen hecho con lo que dice la receta.</b> No cambia dosis ni reemplaza la historia clínica.</p>
+  <button type="button" class="btn" onclick="window.print()">Imprimir o guardar en PDF</button>
+  <a class="btn sec" href="/receta">Volver a la receta</a>
+{% endif %}
+{% endblock %}
