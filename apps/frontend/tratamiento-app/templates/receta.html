@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Receta por visita{% endblock %}
+{% block header %}
+<p class="eyebrow">Receta</p>
+<h1>Receta por visita</h1>
+<p class="sub">{{ perfil.nombre }}</p>
+{% endblock %}
+{% block content %}
+
+{% if modo == 'ver' %}
+  <div class="chips">
+    {% for f in fechas %}
+      <a class="chip {{ 'on' if f == elegida }}" href="/receta?fecha={{ f }}">{{ fecha_corta(f) }}{{ ' · actual' if loop.last and f == elegida }}</a>
+    {% endfor %}
+    <a class="chip add" href="/receta?nueva=1">+ Nueva visita</a>
+  </div>
+  {% for m in filas %}
+  <section class="card">
+    <div class="row">
+      <h3 {% if m.estado == 'suspendido' %}style="text-decoration:line-through"{% endif %}>{{ m.nombre }}</h3>
+      <span class="badge b-{{ m.estado }}">{{ ETIQUETAS[m.estado] }}</span>
+    </div>
+    <p class="muted"><b style="color:var(--navy)">{{ m.detalle }}</b> · cada {{ m.cada_horas }} h · {{ m.dias }} días</p>
+  </section>
+  {% else %}
+  <section class="card"><p>Todavía no hay recetas. Sube la foto de la primera.</p></section>
+  {% endfor %}
+  {% set cambios = filas|rejectattr('estado', 'in', ['igual', 'primera'])|list %}
+  {% if cambios %}
+  <p class="nota"><b>Desde la visita anterior:</b> {{ cambios|length }} cambio{{ 's' if cambios|length != 1 }}. La app solo registra lo que indica la receta.</p>
+  {% endif %}
+  {% if es_ultima %}<a class="btn" href="/entrega">Siguiente: ¿qué te entregaron?</a>{% endif %}
+
+{% elif modo == 'nueva' %}
+  <form method="post" action="/receta/leer" enctype="multipart/form-data" class="card">
+    <h2>Sube la foto de la receta</h2>
+    <p class="muted">Una IA lee los medicamentos y tú confirmas antes de guardar.</p>
+    <label for="foto" class="muted">Foto de la receta</label>
+    <input id="foto" name="foto" type="file" accept="image/*">
+    <button class="btn" type="submit">Leer receta</button>
+    <p class="muted" style="font-size:14px">Si no eliges foto, se usa una receta de ejemplo.</p>
+  </form>
+  <a class="btn sec" href="/receta">Cancelar</a>
+
+{% elif modo == 'borrador' %}
+  {% if borrador.origen == 'simulado' %}
+  <p class="nota"><b>Lectura simulada de ejemplo.</b> Revisa y corrige los datos antes de confirmar.</p>
+  {% else %}
+  <p class="nota"><b>Leída por IA.</b> Revisa que cada dato coincida con la receta.</p>
+  {% endif %}
+  <form method="post" action="/receta/confirmar" style="display:flex;flex-direction:column;gap:12px">
+    {% for m in borrador.medicamentos %}
+    <section class="card">
+      <div class="campo"><label for="n{{ loop.index }}">Medicamento</label>
+        <input id="n{{ loop.index }}" name="nombre" type="text" value="{{ m.nombre }}"></div>
+      <div class="dos">
+        <div class="campo"><label for="d{{ loop.index }}">Dosis (mg)</label>
+          <input id="d{{ loop.index }}" name="dosis_mg" type="number" min="0" value="{{ m.dosis_mg }}"></div>
+        <div class="campo"><label for="h{{ loop.index }}">Cada (horas)</label>
+          <input id="h{{ loop.index }}" name="cada_horas" type="number" min="1" value="{{ m.cada_horas }}"></div>
+        <div class="campo"><label for="t{{ loop.index }}">Días</label>
+          <input id="t{{ loop.index }}" name="dias" type="number" min="1" value="{{ m.dias }}"></div>
+      </div>
+    </section>
+    {% endfor %}
+    <button class="btn" type="submit">Confirmar receta</button>
+  </form>
+  <a class="btn sec" href="/receta">Cancelar</a>
+{% endif %}
+{% endblock %}

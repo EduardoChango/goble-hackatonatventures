@@ -1,0 +1,15 @@
+{
+  "name": "Mi tratamiento",
+  "short_name": "Tratamiento",
+  "description": "Que a nadie se le acabe la medicina a mitad del tratamiento.",
+  "lang": "es",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#F6F8F5",
+  "theme_color": "#0E2A47",
+  "icons": [
+    { "src": "/static/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
