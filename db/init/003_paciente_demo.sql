@@ -1,10 +1,13 @@
 -- Paciente del guion de la demo: espejo exacto de tratamiento-app/data.py::seed()
 -- IDs fijos: paciente 1, visitas 1-2, receta_item 1-5.
+-- Ubicación: La Palma Polo Club (sede del hackatón, Puembo), igual que data.CENTRO.
+
+-- @paciente 1
 
 INSERT INTO paciente (id, nombre, fecha_nacimiento, cuidador, tiene_iess,
                       consentimiento, consentimiento_en, lat, lng)
 VALUES (1, 'Luis Mora (ejemplo)', (CURRENT_DATE - INTERVAL '72 years 4 months')::DATE, 'Hijo/a',
-        TRUE, TRUE, now(), -1.2491, -78.6167);
+        TRUE, TRUE, now(), -0.1588, -78.3665);
 
 INSERT INTO paciente_condicion (paciente_id, condicion_id) VALUES
     (1, 1),  -- Hipertensión

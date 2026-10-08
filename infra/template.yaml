@@ -1,5 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Goble - backend (DynamoDB + Lambda Layer + Lambdas + API Gateway REST)
+Description: >-
+  Goble - backend (DynamoDB + Lambdas + API Gateway REST) y app "Mi tratamiento"
+  (Flask en Lambda + API Gateway HTTP + RDS PostgreSQL en VPC privada + Claude en Bedrock)
 
 Parameters:
   EnvName:
@@ -27,6 +29,24 @@ Parameters:
   GetJobKey:
     Type: String
     Description: S3 key del zip de la lambda get_job
+  FrontendKey:
+    Type: String
+    Description: S3 key del zip de tratamiento-app (Flask + dependencias + db/init)
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    Description: Tamaño de la instancia RDS PostgreSQL
+  ClaudeModel:
+    Type: String
+    Default: anthropic.claude-opus-5-5
+    Description: Modelo de Claude en Bedrock para leer recetas (habilitar el acceso en la consola de Bedrock)
+  BedrockRegion:
+    Type: String
+    Default: ""
+    Description: Región de Bedrock; vacío = la región del stack
+
+Conditions:
+  BedrockRegionDefault: !Equals [!Ref BedrockRegion, ""]
 
 Resources:
   # ---------- Persistencia ----------
@@ -223,7 +243,296 @@ Resources:
       RestApiId: !Ref Api
       StageName: !Ref EnvName
 
+  # ===========================================================================
+  # App "Mi tratamiento" (apps/frontend/tratamiento-app)
+  #
+  #   Navegador ─HTTPS─> API Gateway HTTP ─> Lambda Flask ─┬─> RDS PostgreSQL (subred privada)
+  #                                                        └─> NAT ─> Claude en Bedrock (bedrock-mantle)
+  # ===========================================================================
+
+  # ---------- Red: 1 subred pública (NAT) + 2 privadas (RDS exige 2 AZ) ----------
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.20.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags: [{ Key: Name, Value: !Sub "goble-${EnvName}" }]
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: !Sub "goble-${EnvName}-public" }]
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.10.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{ Key: Name, Value: !Sub "goble-${EnvName}-private-a" }]
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.20.11.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags: [{ Key: Name, Value: !Sub "goble-${EnvName}-private-b" }]
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref Vpc
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  PublicSubnetRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref PublicRouteTable
+
+  # NAT: la Lambda (en subred privada) necesita salir a internet para llegar a Bedrock.
+  # Es el recurso más caro del stack (~USD 1/día): borrar el stack al terminar la demo.
+  NatEip:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+
+  NatGateway:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEip.AllocationId
+      SubnetId: !Ref PublicSubnet
+
+  PrivateRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+
+  PrivateDefaultRoute:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref PrivateRouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGateway
+
+  PrivateSubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetA
+      RouteTableId: !Ref PrivateRouteTable
+
+  PrivateSubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PrivateSubnetB
+      RouteTableId: !Ref PrivateRouteTable
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Lambdas de tratamiento-app (solo salida)
+      VpcId: !Ref Vpc
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: RDS PostgreSQL, solo accesible desde las Lambdas de la app
+      VpcId: !Ref Vpc
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId: !Ref AppSecurityGroup
+
+  # ---------- Secretos ----------
+  DbSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub goble-${EnvName}/db
+      Description: Usuario y contraseña maestros de RDS
+      GenerateSecretString:
+        SecretStringTemplate: '{"username": "goble"}'
+        GenerateStringKey: password
+        PasswordLength: 32
+        ExcludePunctuation: true
+
+  FlaskSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub goble-${EnvName}/flask-secret-key
+      Description: Firma las cookies de sesión del login
+      GenerateSecretString:
+        PasswordLength: 48
+        ExcludePunctuation: true
+
+  # ---------- RDS PostgreSQL ----------
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subredes privadas de goble
+      SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+
+  Database:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete # hackathon: sin snapshot final. En prod: Snapshot
+    UpdateReplacePolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub goble-${EnvName}
+      Engine: postgres
+      EngineVersion: "17.7"
+      DBInstanceClass: !Ref DbInstanceClass
+      AllocatedStorage: "20"
+      StorageType: gp3
+      StorageEncrypted: true
+      DBName: tratamiento
+      MasterUsername: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+      MasterUserPassword: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      VPCSecurityGroups: [!Ref DbSecurityGroup]
+      PubliclyAccessible: false
+      MultiAZ: false
+      BackupRetentionPeriod: 1
+      DeletionProtection: false
+
+  # ---------- Lambdas de la app ----------
+  AppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: bedrock-claude
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: bedrock-mantle:CreateInference # endpoint Messages API de Claude en Bedrock
+                Resource: "*"
+
+  FrontendFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub goble-${EnvName}-tratamiento-app
+      Runtime: python3.12
+      Handler: lambda_handler.handler
+      Role: !GetAtt AppRole.Arn
+      Timeout: 29 # máximo de una integración de API Gateway HTTP
+      MemorySize: 1024
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Ref FrontendKey
+      VpcConfig:
+        SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: tratamiento
+          DB_USER: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+          DB_PASSWORD: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+          SECRET_KEY: !Sub "{{resolve:secretsmanager:${FlaskSecret}}}"
+          SESSION_COOKIE_SECURE: "1"
+          AI_PROVIDER: bedrock
+          CLAUDE_MODEL: !Ref ClaudeModel
+          BEDROCK_REGION: !If [BedrockRegionDefault, !Ref "AWS::Region", !Ref BedrockRegion]
+
+  DbInitFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub goble-${EnvName}-db-init
+      Description: Crea el esquema y carga la data fake (db/init). La invoca infra/deploy.sh
+      Runtime: python3.12
+      Handler: dbinit.handler
+      Role: !GetAtt AppRole.Arn
+      Timeout: 120
+      MemorySize: 512
+      Code:
+        S3Bucket: !Ref ArtifactsBucket
+        S3Key: !Ref FrontendKey
+      VpcConfig:
+        SubnetIds: [!Ref PrivateSubnetA, !Ref PrivateSubnetB]
+        SecurityGroupIds: [!Ref AppSecurityGroup]
+      Environment:
+        Variables:
+          APP_ENV: !Ref EnvName
+          DB_HOST: !GetAtt Database.Endpoint.Address
+          DB_PORT: !GetAtt Database.Endpoint.Port
+          DB_NAME: tratamiento
+          DB_USER: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:username}}"
+          DB_PASSWORD: !Sub "{{resolve:secretsmanager:${DbSecret}:SecretString:password}}"
+
+  FrontendLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/goble-${EnvName}-tratamiento-app
+      RetentionInDays: 14
+
+  DbInitLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/goble-${EnvName}-db-init
+      RetentionInDays: 14
+
+  # API Gateway HTTP (HTTPS incluido): "quick create" con $default -> Lambda Flask
+  FrontendHttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub goble-${EnvName}-tratamiento-app
+      ProtocolType: HTTP
+      Target: !GetAtt FrontendFunction.Arn
+
+  FrontendInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref FrontendFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FrontendHttpApi}/*
+
 Outputs:
+  FrontendUrl:
+    Description: URL pública (HTTPS) de la app Mi tratamiento
+    Value: !GetAtt FrontendHttpApi.ApiEndpoint
+  DbInitFunctionName:
+    Description: Lambda que crea el esquema y carga la data fake
+    Value: !Ref DbInitFunction
+  DbEndpoint:
+    Value: !GetAtt Database.Endpoint.Address
+  DbSecretArn:
+    Description: Usuario y contraseña de RDS (Secrets Manager)
+    Value: !Ref DbSecret
   ApiUrl:
     Description: Usar como API_BASE_URL del frontend (BACKEND_MODE=http)
     Value: !Sub https://${Api}.execute-api.${AWS::Region}.amazonaws.com/${EnvName}

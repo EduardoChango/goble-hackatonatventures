@@ -2,8 +2,8 @@
 
 EDU: este archivo es el punto de enganche para datos reales.
 - FARMACIAS: reemplazar por la API o base de datos de Farmaenlace (stock real).
-- El estado completo (perfil, visitas, entregas, compras, tomas) vive en data/state.json.
-  Si prefieren SQL, cambien load() y save() y dejen el resto igual.
+- Con DATABASE_URL el estado vive en PostgreSQL (db.py); sin ella, en data/state.json.
+  Ver la sección "Almacenamiento" al final.
 """
 import json
 import os
@@ -103,11 +103,30 @@ def seed():
     }
 
 
+# ---------------------------------------------------------------------------
+# Almacenamiento. Dos modos con la misma interfaz:
+# - Con DATABASE_URL (local con Docker) o DB_HOST (AWS) -> PostgreSQL, ver db.py y db/init/.
+#   Cada usuario del login ve solo su paciente; FARMACIAS y PROMOS se leen de la BD.
+# - Sin esas variables -> data/state.json con un solo paciente (Luis Mora), como antes.
+# app.py modifica el dict `s` y luego llama a la función de guardado que corresponde
+# (guardar_perfil, registrar_compra, ...). En modo JSON todas equivalen a save().
+# ---------------------------------------------------------------------------
+USAR_BD = bool(os.getenv("DATABASE_URL") or os.getenv("DB_HOST"))
+DEMO_EMAIL, DEMO_PASSWORD = "luis.mora@demo.ec", "demo1234"  # login del modo JSON
+
+if USAR_BD:
+    import db
+
 _STATE = None
 
 
 def load():
     global _STATE
+    if USAR_BD:
+        s, farmacias, promos = db.cargar()
+        FARMACIAS[:] = farmacias  # logic.py importa esta misma lista
+        PROMOS[:] = promos
+        return s
     if _STATE is None:
         if os.path.exists(PATH):
             with open(PATH, encoding="utf-8") as f:
@@ -119,6 +138,8 @@ def load():
 
 
 def save():
+    if USAR_BD:
+        return
     os.makedirs(os.path.dirname(PATH), exist_ok=True)
     with open(PATH, "w", encoding="utf-8") as f:
         json.dump(_STATE, f, ensure_ascii=False, indent=2)
@@ -126,6 +147,72 @@ def save():
 
 def reset():
     global _STATE
+    if USAR_BD:
+        return db.reset()
     _STATE = seed()
     save()
     return _STATE
+
+
+# ---------- sesión ----------
+def autenticar(email, password):
+    """Devuelve el id del paciente si las credenciales son válidas."""
+    if USAR_BD:
+        return db.autenticar(email, password)
+    ok = email.strip().lower() == DEMO_EMAIL and password == DEMO_PASSWORD
+    return 1 if ok else None
+
+
+def usuarios_demo():
+    """[(email, nombre del paciente)] para mostrar en la pantalla de login."""
+    return db.usuarios_demo() if USAR_BD else [(DEMO_EMAIL, seed()["perfil"]["nombre"])]
+
+
+def usar_paciente(pid):
+    if USAR_BD:
+        db.usar_paciente(pid)
+
+
+def cerrar():
+    if USAR_BD:
+        db.cerrar()
+
+
+# ---------- guardado ----------
+def _guardar(funcion, *args):
+    if USAR_BD:
+        getattr(db, funcion)(*args)
+    else:
+        save()
+
+
+def guardar_perfil(perfil):
+    _guardar("guardar_perfil", perfil)
+
+
+def guardar_ubicacion(lat, lng):
+    _guardar("guardar_ubicacion", lat, lng)
+
+
+def guardar_receta(fecha, meds, origen="manual", extraccion=None):
+    _guardar("guardar_receta", fecha, meds, origen, extraccion)
+
+
+def registrar_entrega(fecha, registro):
+    _guardar("registrar_entrega", fecha, registro)
+
+
+def registrar_compra(farmacia_id, modo, unidades):
+    _guardar("registrar_compra", farmacia_id, modo, unidades)
+
+
+def registrar_toma(did):
+    _guardar("registrar_toma", did)
+
+
+def guardar_avisos(avisos, claves_nuevas):
+    _guardar("guardar_avisos", avisos, claves_nuevas)
+
+
+def encolar_aviso(aviso):
+    _guardar("encolar_aviso", aviso)

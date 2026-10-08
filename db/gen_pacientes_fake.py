@@ -1,18 +1,27 @@
-"""Genera db/init/004_pacientes_fake.sql: 10 pacientes fake, uno por cada caso de la app.
+"""Genera los seeds de pacientes fake y de usuarios de la demo:
+
+    db/init/004_pacientes_fake.sql   10 pacientes fake (ids 2-11), uno por cada caso de la app
+    db/init/005_usuarios.sql         un usuario de login por paciente (ids 1-11)
 
 Uso:  py db/gen_pacientes_fake.py
 
 Es determinista (semilla fija): regenerarlo produce el mismo SQL.
 Las fechas de visitas, tomas y citas son relativas a CURRENT_DATE para que la data
 siempre se vea "actual" sin importar cuándo se levante la base.
+Cada paciente va en un bloque "-- @paciente N": "Restablecer datos" re-ejecuta solo ese bloque.
 """
 
+import hashlib
 import json
 import random
+import unicodedata
 from datetime import date
 from pathlib import Path
 
-OUT = Path(__file__).resolve().parent / "init" / "004_pacientes_fake.sql"
+INIT = Path(__file__).resolve().parent / "init"
+OUT = INIT / "004_pacientes_fake.sql"
+OUT_USUARIOS = INIT / "005_usuarios.sql"
+PASSWORD_DEMO = "demo1234"
 rng = random.Random(2026)
 
 MED = {"Losartán": 1, "Metformina": 2, "Atorvastatina": 3, "Amlodipino": 4,
@@ -28,8 +37,8 @@ APELLIDOS = ["Guamán", "Paredes", "Villacís", "Naranjo", "Chicaiza", "Lozada",
              "Pazmiño", "Altamirano", "Toapanta", "Sánchez", "Cevallos", "Masaquiza"]
 CUIDADORES = ["Hijo/a", "Esposo/a", "Nieto/a", "Hermano/a", None]
 
-# Ambato aprox.: centro (-1.2491, -78.6167)
-LAT, LNG = -1.2491, -78.6167
+# Puembo: La Palma Polo Club, sede del hackatón (igual que data.CENTRO)
+LAT, LNG = -0.1588, -78.3665
 
 
 def item(nombre, dosis, cada=24, dias=30):
@@ -102,6 +111,30 @@ def dias_atras(n):
     return "CURRENT_DATE" if n == 0 else f"CURRENT_DATE - {n}"
 
 
+def password_hash(password, salt):
+    """Mismo formato que werkzeug.security.generate_password_hash(method="pbkdf2")."""
+    iteraciones = 600_000
+    h = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), iteraciones).hex()
+    return f"pbkdf2:sha256:{iteraciones}${salt}${h}"
+
+
+def email_de(nombre):
+    """'Luis Mora (ejemplo)' -> 'luis.mora@demo.ec'"""
+    base = unicodedata.normalize("NFKD", nombre.replace(" (ejemplo)", "")).encode("ascii", "ignore").decode()
+    return ".".join(base.lower().split()) + "@demo.ec"
+
+
+def usuarios_sql(pacientes):
+    sql = ["-- GENERADO por db/gen_pacientes_fake.py. No editar a mano: edita el script y regenera.",
+           f"-- Un usuario por paciente. Contraseña de todos: {PASSWORD_DEMO}", ""]
+    for pid, nombre in pacientes:
+        salt = "".join(rng.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") for _ in range(16))
+        sql += [f"-- @paciente {pid}",
+                "INSERT INTO usuario (id, paciente_id, email, password_hash) VALUES "
+                f"({pid}, {pid}, {q(email_de(nombre))}, {q(password_hash(PASSWORD_DEMO, salt))});", ""]
+    return "\n".join(sql)
+
+
 def extraccion_ia(items):
     """Simula la salida cruda de ai.extraer_receta(): nombres sin normalizar y algún null."""
     crudo = []
@@ -126,6 +159,7 @@ def main():
         consentimiento = caso.get("consentimiento", True)
         cuidador = caso["cuidador"] if "cuidador" in caso else rng.choice(CUIDADORES)
 
+        sql.append(f"-- @paciente {pid}")
         sql.append(f"-- ---------- Paciente {pid}: {caso['caso']} ----------")
         sql.append(
             "INSERT INTO paciente (id, nombre, fecha_nacimiento, cuidador, tiene_iess, "
@@ -191,19 +225,27 @@ def main():
         # Aviso de la toma de la mañana ya mostrado (dedupe por clave)
         rid, it = next(iter(actuales.values()))
         h = it["horarios"][0]
+        cuerpo = f"{h} · {it['nombre']} {it['dosis_mg']} mg"
+        corto = f"Es hora de tu medicina de las {h}."
+        clave = f"|{it['nombre']}@{h}|toma"
         sql.append(
-            "INSERT INTO aviso (paciente_id, tipo, titulo, cuerpo, url, clave, creado_en, mostrado_en) VALUES "
-            f"({pid}, 'toma', 'Es hora de tu medicina', {q(f'{h} · {it['nombre']} {it['dosis_mg']} mg')}, '/plan', "
-            f"to_char(CURRENT_DATE, 'YYYY-MM-DD') || {q(f'|{it['nombre']}@{h}|toma')}, "
+            "INSERT INTO aviso (paciente_id, tipo, titulo, cuerpo, corto, url, clave, creado_en, mostrado_en) VALUES "
+            f"({pid}, 'toma', 'Es hora de tu medicina', {q(cuerpo)}, {q(corto)}, '/plan', "
+            f"to_char(CURRENT_DATE, 'YYYY-MM-DD') || {q(clave)}, "
             f"CURRENT_DATE + TIME '{h}', CURRENT_DATE + TIME '{h}');")
         if caso.get("aviso_cola"):
             sql.append(
-                "INSERT INTO aviso (paciente_id, tipo, titulo, cuerpo, url) VALUES "
-                f"({pid}, 'compra', 'Falta comprar medicinas', 'Te falta: Atorvastatina, Omeprazol.', '/farmacias');")
+                "INSERT INTO aviso (paciente_id, tipo, titulo, cuerpo, corto, url) VALUES "
+                f"({pid}, 'compra', 'Falta comprar medicinas', 'Te falta: Atorvastatina, Omeprazol.', "
+                "'Tienes medicinas pendientes por comprar.', '/farmacias');")
         sql.append("")
 
     OUT.write_text("\n".join(sql), encoding="utf-8")
     print(f"Generado {OUT}")
+
+    pacientes = [(1, "Luis Mora (ejemplo)")] + [(pid, n + " (ejemplo)") for pid, n in enumerate(nombres, start=2)]
+    OUT_USUARIOS.write_text(usuarios_sql(pacientes), encoding="utf-8")
+    print(f"Generado {OUT_USUARIOS}")
 
 
 if __name__ == "__main__":
