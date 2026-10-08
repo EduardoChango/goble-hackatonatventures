@@ -23,7 +23,7 @@ Lambda goble-<env>-db-init ──► crea el esquema y carga los datos: catálog
 | Recurso | Detalle |
 |---|---|
 | VPC | 1 subred pública (NAT) + 2 privadas (RDS exige 2 zonas) |
-| RDS | `db.t4g.micro`, 20 GB gp3 cifrado, sin acceso público |
+| RDS | `db.t3.micro` (cambiable con `-DbInstanceClass`), 20 GB gp3 cifrado, sin acceso público |
 | Secrets Manager | `goble-<env>/db` (usuario y contraseña de RDS) y `goble-<env>/flask-secret-key` (firma las cookies del login) |
 | Lambda Flask | Misma app que en local, vía `apig-wsgi`. `AI_PROVIDER=bedrock` |
 | API Gateway HTTP | Da la URL HTTPS que necesita la PWA (notificaciones y ubicación) |

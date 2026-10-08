@@ -101,7 +101,7 @@ powershell -ExecutionPolicy Bypass -File infra\deploy.ps1
 |---|---|
 | Empaquetar | Genera los zips en `build\artifacts\`. La primera vez descarga las dependencias para Linux (1-2 min) |
 | Subir | Crea el bucket `goble-artifacts-<cuenta>-<región>` y sube los zips |
-| CloudFormation | Crea el stack `goble-dev`: VPC, NAT, RDS, Lambdas y API. **Unos 15 minutos la primera vez** |
+| CloudFormation | Crea el stack `goble-dev`: VPC, NAT, RDS (`db.t3.micro`), Lambdas y API. **Unos 15 minutos la primera vez** |
 | Base de datos | Invoca la Lambda `goble-dev-db-init`, que carga el catálogo de Farmaenlace (farmacias, medicinas y stock) y los 11 pacientes |
 
 Opciones útiles:
@@ -219,13 +219,36 @@ RDS se borra sin snapshot final y los secretos quedan programados para borrarse 
 | `SignatureDoesNotMatch` | La clave secreta llegó alterada. En PowerShell, cópiala de la pestaña **Windows PowerShell**. En Git Bash, ver el anexo |
 | "la ejecución de scripts está deshabilitada" | Ejecuta el script con `powershell -ExecutionPolicy Bypass -File ...`, como en el Paso 4 |
 | Falla al empaquetar (`pip`) | Recrea el entorno: `Remove-Item -Recurse -Force .venv; py -m venv .venv` |
-| El stack queda en `ROLLBACK_COMPLETE` | Busca el primer `CREATE_FAILED` con el comando del Paso 4. Borra el stack (Paso 8) antes de reintentar |
+| El stack falla o queda en `ROLLBACK_COMPLETE` | Mira la causa con el comando de abajo (*Ver la causa de un fallo*). Luego borra el stack (Paso 8) antes de reintentar |
 | `CREATE_FAILED` con `not authorized` o `explicit deny` | La cuenta del workshop prohíbe ese recurso (por ejemplo NAT, EIP o RDS). Anota el recurso y el mensaje para buscar una alternativa |
+| `Database`: *no Availability Zones with sufficient capacity* (`ServiceLimitExceeded`) | AWS no tiene capacidad para ese tamaño de RDS en la región. Borra el stack (Paso 8) y despliega con otro tamaño: `-DbInstanceClass db.t3.small` o `db.t4g.micro` |
 | `db-init` responde con error o timeout | `aws logs tail /aws/lambda/goble-dev-db-init`. La Lambda debe estar en la VPC y llegar a RDS por el puerto 5432 |
 | La URL responde `Internal Server Error` | `aws logs tail /aws/lambda/goble-dev-tratamiento-app` |
 | `AccessDeniedException ... private marketplace eligibility` en Bedrock | El workshop no aprobó ese modelo. Usa otro Claude con `-ClaudeModel` (Paso 3) |
 | La receta siempre sale "simulada" | El modelo no está activo: pruébalo en el playground de Bedrock (Paso 3). También puede ser que la región no lo soporte o que la foto pese más de unos 5 MB |
 | Archivos `deleted:` en `git status` que no borraste | OneDrive. `git restore .` los recupera |
+
+### Ver la causa de un fallo del stack
+
+Cuando `deploy.ps1` termina con *"Failed to create/update the stack"*, el motivo real está en los eventos del stack.
+La mayoría dice *"Resource creation cancelled"*, que es solo una consecuencia; este comando muestra únicamente la causa:
+
+```powershell
+$Env:AWS_PAGER = ""   # evita el paginador "-- More --"
+aws cloudformation describe-stack-events --stack-name goble-dev `
+  --query "StackEvents[?ResourceStatus=='CREATE_FAILED' && ResourceStatusReason!='Resource creation cancelled'].[LogicalResourceId,ResourceStatusReason]" `
+  --output text
+```
+
+Si ya borraste el stack, sus eventos siguen disponibles unos 90 días usando el ID en lugar del nombre:
+
+```powershell
+$StackId = aws cloudformation list-stacks --stack-status-filter DELETE_COMPLETE `
+  --query "StackSummaries[?StackName=='goble-dev'] | [0].StackId" --output text
+aws cloudformation describe-stack-events --stack-name $StackId `
+  --query "StackEvents[?ResourceStatus=='CREATE_FAILED' && ResourceStatusReason!='Resource creation cancelled'].[LogicalResourceId,ResourceStatusReason]" `
+  --output text
+```
 
 ---
 

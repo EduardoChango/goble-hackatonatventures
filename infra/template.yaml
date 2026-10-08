@@ -34,8 +34,10 @@ Parameters:
     Description: S3 key del zip de tratamiento-app (Flask + dependencias + db/init)
   DbInstanceClass:
     Type: String
-    Default: db.t4g.micro
-    Description: Tamaño de la instancia RDS PostgreSQL
+    Default: db.t3.micro
+    Description: >-
+      Tamaño de la instancia RDS PostgreSQL. Si RDS responde que no hay capacidad
+      en las zonas de disponibilidad, prueba otro (db.t4g.micro, db.t3.small)
   ClaudeModel:
     Type: String
     Default: anthropic.claude-sonnet-5

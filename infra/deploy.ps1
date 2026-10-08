@@ -7,6 +7,7 @@
   powershell -ExecutionPolicy Bypass -File infra\deploy.ps1
   powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -DbReset
   powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -ClaudeModel anthropic.claude-opus-4-8
+  powershell -ExecutionPolicy Bypass -File infra\deploy.ps1 -DbInstanceClass db.t3.small
 
 .NOTES
   Requiere AWS CLI v2 y credenciales en el entorno ($Env:AWS_ACCESS_KEY_ID, etc.).
@@ -19,6 +20,7 @@ param(
     [string]$Region = $Env:AWS_REGION,
     [string]$ArtifactsBucket = "",
     [string]$ClaudeModel = "anthropic.claude-sonnet-5",
+    [string]$DbInstanceClass = "db.t3.micro",  # si no hay capacidad en la región: db.t4g.micro, db.t3.small
     [switch]$DbReset  # borra la BD y vuelve a cargar la data fake
 )
 
@@ -77,7 +79,8 @@ $Params = @(
     "ProcessJobKey=$Prefix/$($Keys.PROCESS_JOB_ZIP)",
     "GetJobKey=$Prefix/$($Keys.GET_JOB_ZIP)",
     "FrontendKey=$Prefix/$($Keys.FRONTEND_ZIP)",
-    "ClaudeModel=$ClaudeModel"
+    "ClaudeModel=$ClaudeModel",
+    "DbInstanceClass=$DbInstanceClass"
 )
 if ($ProviderApiUrl) { $Params += "ProviderApiUrl=$ProviderApiUrl" }
 Invoke-Native aws (@("cloudformation", "deploy", "--region", $Region, "--stack-name", $Stack,

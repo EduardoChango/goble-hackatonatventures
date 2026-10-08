@@ -15,6 +15,7 @@
 #   ARTIFACTS_BUCKET  bucket para los zips             (default: goble-artifacts-<account>-<region>)
 #   CLAUDE_MODEL      modelo de Bedrock                (default: anthropic.claude-sonnet-5)
 #   DB_RESET          1 = borra la BD y vuelve a cargar la data fake (default: 0)
+#   DB_INSTANCE_CLASS tamaño de RDS                    (default: db.t3.micro)
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -30,6 +31,7 @@ PREFIX="goble/${ENV_NAME}"
 STACK="goble-${ENV_NAME}"
 CLAUDE_MODEL="${CLAUDE_MODEL:-anthropic.claude-sonnet-5}"
 DB_RESET="${DB_RESET:-0}"
+DB_INSTANCE_CLASS="${DB_INSTANCE_CLASS:-db.t3.micro}"
 # .venv del repo si existe; en Windows "python3" suele ser el atajo de la Microsoft Store
 if [ -x .venv/Scripts/python ]; then PYTHON=.venv/Scripts/python
 elif [ -x .venv/bin/python ]; then PYTHON=.venv/bin/python
@@ -68,7 +70,8 @@ aws cloudformation deploy \
     ProcessJobKey="${PREFIX}/${PROCESS_JOB_ZIP}" \
     GetJobKey="${PREFIX}/${GET_JOB_ZIP}" \
     FrontendKey="${PREFIX}/${FRONTEND_ZIP}" \
-    ClaudeModel="$CLAUDE_MODEL"
+    ClaudeModel="$CLAUDE_MODEL" \
+    DbInstanceClass="$DB_INSTANCE_CLASS"
 
 echo ">> Base de datos (Lambda db-init)"
 if [ "$DB_RESET" = "1" ]; then PAYLOAD='{"forzar": true}'; else PAYLOAD='{}'; fi
